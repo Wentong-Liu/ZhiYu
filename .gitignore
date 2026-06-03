@@ -10,3 +10,6 @@ DerivedData/
 .build/
 .swiftpm/
 Package.resolved
+
+# 本地诊断/临时笔记（含微信聊天 PII，绝不提交）
+.local-notes/
