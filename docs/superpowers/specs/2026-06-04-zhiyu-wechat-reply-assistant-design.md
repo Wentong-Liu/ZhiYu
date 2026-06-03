@@ -35,7 +35,7 @@
 |---|--------|------|
 | 1 | 读取微信内容的技术路线 | **辅助功能 API（AX）为主 + 截图 OCR 兜底**；OCR 为可单独开关的独立模块 |
 | 2 | 触发方式 | **全局快捷键（永远可用）** + **可配置的"聚焦输入框自动触发"开关** |
-| 3 | 去重/防抖 | 对 `(聊天对象 + 上下文)` 算 hash；与上次相同则**复用候选、不调用模型** |
+| 3 | 去重/防抖 | 对 `(聊天对象 + 上下文 + 输入框草稿)` 算 hash；与上次相同则**复用候选、不调用模型**（草稿是 prompt 输入，必须纳入 key，否则改草稿会命中过时候选） |
 | 4 | Provider 接入 | **API Key + OpenAI OAuth（Sign in with ChatGPT）都要** |
 | 5 | 回复风格 | **预设风格 + 自定义文本**；全局默认 + 按聊天对象覆盖（nice-to-have） |
 | 6 | 候选落地 | 候选卡：**点内容=仅填入输入框**；**点发送按钮=填入并发送** |
@@ -54,7 +54,7 @@
 | `WeChatReader` | 用 AX 读取当前聊天窗口的可见消息、聊天对象名、输入框 frame 与焦点状态；区分"我/对方" | Accessibility API |
 | `OCRFallback` | AX 读不到文本时，截图聊天区域 + Vision OCR 识别（可开关的独立模块） | ScreenCaptureKit / CGWindow, Vision |
 | `TriggerEngine` | 注册全局快捷键；可选监听前台 App + 输入框焦点以"聚焦自动触发" | Carbon/AppKit 全局热键, AX 通知 |
-| `ContextHasher` | 对 `(聊天对象 + 规整化上下文)` 计算 hash；维护去重缓存 | — |
+| `ContextHasher` | 对 `(聊天对象 + 规整化上下文 + 输入框草稿)` 计算 hash；维护去重缓存 | — |
 | `ProviderManager` | 统一 Provider 抽象；管理 API Key 与 OAuth 两种鉴权；拉取/维护模型列表 | URLSession, Keychain |
 | `ReplyGenerator` | 组装 prompt（风格+语言+上下文+草稿）、调用 Provider、产出 N 条候选 | ProviderManager |
 | `CandidatePanel` | 悬浮面板 UI，锚定输入框；渲染候选卡与发送按钮；快捷键选中 | AppKit NSPanel + SwiftUI |
@@ -67,7 +67,7 @@
 ```
 触发 (全局快捷键 / 聚焦自动触发)
    → WeChatReader 抓取当前聊天对象 + 可见消息 + 输入框 frame/草稿
-   → ContextHasher 计算 (对象 + 上下文) hash
+   → ContextHasher 计算 (对象 + 上下文 + 草稿) hash
         ├─ 命中缓存 → 直接复用上次候选（不调用模型）
         └─ 未命中 → ReplyGenerator 组装 prompt → ProviderManager 调用模型 → N 条候选
    → CandidatePanel 在输入框上方弹出候选
@@ -98,7 +98,8 @@
 - 触发后调用 `WeChatReader` 并进入主流程。
 
 ### 5.4 ContextHasher（去重缓存）
-- 缓存 key：`(聊天对象标识, 规整化上下文文本的 hash)`。
+- 缓存 key：`(聊天对象标识, 规整化上下文文本, 输入框草稿文本)` 一起算 hash。
+- **草稿必须纳入 key**：草稿是 `ReplyGenerator` 的 prompt 输入（见 5.6），若不计入 hash，用户改了草稿但上下文没变时会命中过时候选。草稿变 → key 变 → 重新生成；草稿没变仍能命中缓存。
 - 规整化：去除时间戳/空白噪声后再 hash，避免无意义抖动。
 - 命中：直接返回上次为该 key 生成的候选，不调用模型。
 - 失效：切换聊天对象各自独立；缓存仅存内存，App 退出即清。
