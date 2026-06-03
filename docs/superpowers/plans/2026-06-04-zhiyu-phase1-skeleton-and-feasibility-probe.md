@@ -4,11 +4,35 @@
 
 **Goal:** 搭好菜单栏 App 骨架与带单测的核心逻辑包，并用探针实证验证"微信 AX 读取 / 输入框定位 / 文本写入 / 模拟发送"是否可行——这是整个项目最高风险点，必须先验证再投入后续。
 
-**Architecture:** 纯逻辑（模型 / 去重 hash / 候选缓存）放进独立本地 SPM 包 `ZhiYuCore`，用 `swift test` 跑 TDD；系统集成（菜单栏 / 辅助功能 / AX 读写 / CGEvent / 悬浮窗）放在 Xcode App target `ZhiYu/`（工程已启用文件系统同步组，新建 `.swift` 自动入编译），用 `xcodebuild` 编译验证 + 手动探针验证。App 通过本地包依赖引用 `ZhiYuCore`。
+**Architecture:** 纯逻辑（模型 / 去重 hash / 候选缓存）放进独立本地 SPM 包 `ZhiYuCore`，用 `swift test` 跑 TDD；系统集成（菜单栏 / 辅助功能 / AX 读写 / CGEvent / 悬浮窗）放在 Xcode App target `ZhiYu/`（工程已启用文件系统同步组，新建 `.swift` 自动入编译），用 `xcodebuild` 编译验证 + 手动探针验证。**Phase 1 探针为独立验证代码、不依赖 `ZhiYuCore`**（见「执行说明」），二者在 Phase 2 才汇合。
 
 **Tech Stack:** Swift 6.3 / SwiftUI（MenuBarExtra）/ AppKit / ApplicationServices（Accessibility）/ CGEvent / Swift Package Manager + Swift Testing。目标 macOS 26.5。
 
 **对应 spec:** `docs/superpowers/specs/2026-06-04-zhiyu-wechat-reply-assistant-design.md`
+
+---
+
+## 执行说明（UltraCode 自动化运行；优先级高于下方个别代码块）
+
+为让 Phase 1 全程可由命令行（`swift test` + `xcodebuild`）验证、无需 Xcode GUI：
+
+1. **Task 7「把 ZhiYuCore 接入 App」移到 Phase 2**，Phase 1 跳过。
+2. **Phase 1 探针（Task 8/9 及之后）不 `import ZhiYuCore`**，改用 App 内本地轻量结构承载读取结果；`ZhiYuCore` 包仍独立用 `swift test` 验证。凡 Task 8/9 代码里用到 `ChatContext`/`ChatMessage` 之处，一律替换为以下本地类型：
+
+```swift
+// 定义在 WeChatAXProbe 内
+struct Message { let isMe: Bool; let text: String }
+struct ProbeResult {
+    var contactName: String
+    var messages: [Message]
+    var draft: String
+    var inputFrame: CGRect?
+    var inputFocused: Bool
+    var rawLines: [String]
+}
+```
+
+`ProbeViewModel.runAXProbe()` 据此用 `r.contactName` / `r.draft` / `r.messages`（元素含 `isMe`、`text`）/ `r.inputFocused` / `r.inputFrame` / `r.rawLines` 渲染，不再访问 `r.context.*`。
 
 ---
 
@@ -50,8 +74,8 @@ ZhiYu/
 
 ---
 
-## 一次性手动前置（仅 Task 7 需要，已在该任务内说明）
-- 把本地包 `ZhiYuCore` 通过 Xcode GUI 加为 App 的本地依赖（objectVersion 77 工程手改 pbxproj 风险高，用 GUI 最稳）。
+## Phase 1 无需 Xcode GUI 手动操作
+- 探针不依赖 `ZhiYuCore`，因此 Phase 1 **不需要**把本地包接入 App（该步骤移到 Phase 2 起步）。Phase 1 全部代码可用 `swift test` 与 `xcodebuild` 验证。
 
 ## 已知开发期摩擦（执行时心里有数）
 - **辅助功能权限**：每次重新编译，App 二进制变化可能导致已授予的"辅助功能"信任失效、需重新勾选。可在工程里设固定签名（ad-hoc 固定身份/开发者证书）缓解；Phase 1 先接受"必要时去系统设置重新勾选"。
@@ -605,48 +629,9 @@ git commit -m "feat(app): 辅助功能权限检查与引导" -m "Co-Authored-By:
 
 ---
 
-## Task 7：把 `ZhiYuCore` 接入 App（手动 GUI 一次）
+## Task 7：（已移至 Phase 2，Phase 1 跳过）
 
-**Files:**
-- Modify: `ZhiYu.xcodeproj`（由 Xcode 自动写入包依赖）
-- Modify: `ZhiYu/Probe/ProbeView.swift`（加一行 `import ZhiYuCore` 验证可用）
-
-- [ ] **Step 1: 在 Xcode 添加本地包依赖**（手动）
-
-1. 用 Xcode 打开 `ZhiYu.xcodeproj`。
-2. 菜单 File → Add Package Dependencies…
-3. 左下角点 "Add Local…"，选择仓库根的 `ZhiYuCore` 文件夹，Add Package。
-4. 在弹出的产品选择里，把 `ZhiYuCore` 库勾给 target `ZhiYu`，Add。
-
-- [ ] **Step 2: 在 ProbeView 验证 import 可用**
-
-`ZhiYu/Probe/ProbeView.swift`（整文件替换）:
-```swift
-import SwiftUI
-import ZhiYuCore
-
-struct ProbeView: View {
-    var body: some View {
-        // 用一次 ZhiYuCore 类型，确认包已正确链接
-        let demo = ChatContext(contactName: "联调", messages: [], draft: "")
-        return Text("探针窗口（占位）。已链接 ZhiYuCore：\(demo.contactName)")
-            .padding()
-            .frame(width: 560, height: 480)
-    }
-}
-```
-
-- [ ] **Step 3: 编译验证**
-
-Run: `xcodebuild -project ZhiYu.xcodeproj -scheme ZhiYu -configuration Debug build`
-Expected: `** BUILD SUCCEEDED **`（若报找不到 `ZhiYuCore`，说明 Step 1 的包依赖没加成功，回到 Xcode 重做）。
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add ZhiYu.xcodeproj ZhiYu
-git commit -m "build: App 接入本地包 ZhiYuCore" -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
-```
+把本地包 `ZhiYuCore` 接入 App（Xcode 加本地包依赖）原计划在此。但 **Phase 1 探针不依赖该包**（见顶部「执行说明」），因此此步骤推迟到 Phase 2 起步。Phase 1 不执行本任务。
 
 ---
 
@@ -1140,7 +1125,7 @@ git commit -m "feat(probe): 全局快捷键 ⌥⌘R 触发 AX 探针" -m "Co-Aut
 
 ## 后续 Roadmap（各自单独出计划，待探针结论后细化）
 
-- **Phase 2 — Provider 层（API Key）**：`ProviderManager` 统一抽象（name/baseURL/authMode/model）、Keychain 存 key、OpenAI 兼容请求/响应解析（用 URLProtocol mock 做 TDD）、模型选择。产出：能用一个真实 API Key 调通一次补全。
+- **Phase 2 — 接入 ZhiYuCore + Provider 层（API Key）**：首步把本地包 `ZhiYuCore` 接入 App（Xcode 加本地包依赖，原 Task 7）。然后 `ProviderManager` 统一抽象（name/baseURL/authMode/model）、Keychain 存 key、OpenAI 兼容请求/响应解析（用 URLProtocol mock 做 TDD）、模型选择。产出：能用一个真实 API Key 调通一次补全。
 - **Phase 3 — 主闭环**：`TriggerEngine`（正式快捷键 + 可选聚焦触发）+ `WeChatReader`（探针逻辑产品化）+ `ContextHasher`/`CandidateCache` 去重 + `ReplyGenerator`（风格+语言+草稿组 prompt）。产出：触发→读取→去重→生成→拿到 N 条候选（先 console 验证）。
 - **Phase 4 — 候选悬浮面板**：non-activating `NSPanel` 锚定输入框、候选卡（点填入 / 点发送按钮）、数字键选中、失焦消失。
 - **Phase 5 — 设置 UI + 风格**：SwiftUI 设置窗口（Provider/模型/风格/快捷键/触发/OCR/权限状态）、预设+自定义风格、全局默认 +（nice-to-have）按联系人覆盖。
