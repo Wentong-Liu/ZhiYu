@@ -4,20 +4,33 @@ import ApplicationServices
 @MainActor
 enum InserterProbe {
     /// 用 AX 直接把文本设进微信输入框。返回是否成功。
+    /// 与探针读取口径一致：复用 collectEditables + pickComposer 定位底部消息输入框，
+    /// 不再取 collect() 抓到的第一个可编辑元素（很可能是左上角搜索框）。
     static func setText(_ text: String) -> Bool {
-        guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return false }
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        guard let window = WeChatAXProbe.copyElement(appElement, "AXFocusedWindow")
-                ?? WeChatAXProbe.copyElement(appElement, "AXMainWindow") else { return false }
-        var texts: [(text: String, frame: CGRect)] = []
-        var input: AXUIElement?
-        WeChatAXProbe.collect(window, texts: &texts, input: &input)
-        guard let field = input else { return false }
+        guard let field = locateComposer() else { return false }
         return AXUIElementSetAttributeValue(field, "AXValue" as CFString, text as CFString) == .success
     }
 
+    /// 定位微信消息输入框 composer（读/写共用同一规则）。
+    static func locateComposer() -> AXUIElement? {
+        guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        guard let window = WeChatAXProbe.copyElement(appElement, "AXFocusedWindow")
+                ?? WeChatAXProbe.copyElement(appElement, "AXMainWindow") else { return nil }
+        let editables = WeChatAXProbe.collectEditables(window)
+        return WeChatAXProbe.pickComposer(from: editables)?.element
+    }
+
+    /// 读取当前 composer 的 AXValue，用于写入后校验。
+    static func composerValue() -> String? {
+        guard let field = locateComposer() else { return nil }
+        return WeChatAXProbe.copyString(field, "AXValue")
+    }
+
     /// 兜底：写剪贴板 + 模拟 ⌘V 粘贴到当前焦点（用后恢复原剪贴板）。
-    static func pasteText(_ text: String) {
+    /// completion 在 ⌘V 事件 post 之后触发——调用方（如 pasteAndSend）应在该回调里再
+    /// 延时回车，而不是用一个与本函数内部 0.25s 解耦的独立计时器。回调在主线程执行。
+    static func pasteText(_ text: String, completion: (() -> Void)? = nil) {
         let pb = NSPasteboard.general
         // 完整保存原剪贴板内容（遍历所有 item 的所有 type 存为 Data），
         // 避免只处理 .string 时把用户原本的图片/RTF/文件 URL 等内容破坏掉。
@@ -30,6 +43,7 @@ enum InserterProbe {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             postKey(9, flags: .maskCommand)            // 'v'
             restoreSnapshotWhenSafe(saved, into: pb, pasteWriteChangeCount: changeCountBeforePaste)
+            completion?()
         }
     }
 

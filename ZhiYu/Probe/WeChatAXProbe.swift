@@ -77,13 +77,8 @@ enum WeChatAXProbe {
 
         // 【候选输入框收集 + composer 定位】不再取"第一个 TextField/TextArea"（会撞左上角搜索框）。
         // 收集全部可编辑元素，选 minY 最大（最靠底部）且宽度足够的作为消息输入框 composer。
-        var editables: [(role: String, frame: CGRect)] = []
-        collectEditables(window, into: &editables)
-        let minComposerWidth: CGFloat = 120  // 宽度门槛，排除窄搜索框等
-        let composer = editables
-            .filter { $0.frame.width >= minComposerWidth }
-            .max(by: { $0.frame.minY < $1.frame.minY })
-            ?? editables.max(by: { $0.frame.minY < $1.frame.minY })
+        let editables = collectEditables(window)
+        let composer = pickComposer(from: editables)
         let candidateLines: [String] = editables.isEmpty
             ? ["(无可编辑元素)"]
             : editables.map { fmtFrame(role: $0.role, frame: $0.frame) }
@@ -111,11 +106,13 @@ enum WeChatAXProbe {
             }
 
         let title = copyString(window, "AXTitle") ?? app.localizedName ?? "未知联系人"
-        // composer 仅记录其 frame；draft/focus 仍尽量取一个可编辑元素的值（优先 composer 对应不到则用旧 input）。
+        // 读/写口径统一：draft/focus 都从选中的 composer 元素读取，而非 collect() 抓到的第一个
+        // 可编辑元素（很可能是左上角搜索框）。无 composer 时回退到旧 input，至少不报告空。
+        let composerElement = composer?.element ?? input
         let inputFrame: CGRect? = composer?.frame ?? input.flatMap { frame(of: $0) }
         var draft = ""
         var inputFocused = false
-        if let field = input {
+        if let field = composerElement {
             draft = copyString(field, "AXValue") ?? ""
             inputFocused = copyBool(field, "AXFocused") ?? false
         }
@@ -199,18 +196,41 @@ enum WeChatAXProbe {
         }
     }
 
-    /// 递归收集所有可编辑元素(AXTextArea/AXTextField)及其 frame。复用 frame(of:) 的安全类型守卫。
-    static func collectEditables(_ el: AXUIElement,
-                                 into out: inout [(role: String, frame: CGRect)],
-                                 depth: Int = 0) {
+    /// 可编辑元素候选：保留 AXUIElement 引用，供后续读 AXValue/AXFocused 或写入复用。
+    struct Editable {
+        let element: AXUIElement
+        let role: String
+        let frame: CGRect
+    }
+
+    /// 递归收集所有可编辑元素(AXTextArea/AXTextField)，保留元素引用 + frame。复用 frame(of:) 的安全类型守卫。
+    static func collectEditables(_ el: AXUIElement) -> [Editable] {
+        var out: [Editable] = []
+        collectEditables(el, into: &out, depth: 0)
+        return out
+    }
+
+    private static func collectEditables(_ el: AXUIElement,
+                                         into out: inout [Editable],
+                                         depth: Int) {
         guard depth < 60 else { return }
         let r = role(el)
         if r == roleTextArea || r == roleTextField, let f = frame(of: el) {
-            out.append((r, f))
+            out.append(Editable(element: el, role: r, frame: f))
         }
         for child in children(el) {
             collectEditables(child, into: &out, depth: depth + 1)
         }
+    }
+
+    /// 统一的 composer 定位：选 minY 最大（最靠底部）且宽度足够的可编辑元素作为消息输入框，
+    /// 排除左上角窄搜索框。读(draft/focus)与写(setText)共用此规则，保证口径一致。
+    static func pickComposer(from editables: [Editable]) -> Editable? {
+        let minComposerWidth: CGFloat = 120  // 宽度门槛，排除窄搜索框等
+        return editables
+            .filter { $0.frame.width >= minComposerWidth }
+            .max(by: { $0.frame.minY < $1.frame.minY })
+            ?? editables.max(by: { $0.frame.minY < $1.frame.minY })
     }
 
     /// 格式化：role(+subrole) + frame。

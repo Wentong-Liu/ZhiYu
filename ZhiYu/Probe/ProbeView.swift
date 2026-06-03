@@ -47,17 +47,29 @@ final class ProbeViewModel: ObservableObject {
     }
 
     func insertAndSend() {
-        let ok = InserterProbe.setText("【知语测试】这条是写入并发送测试")
-        InserterProbe.sendReturn()
-        output = "写入(\(ok))并已模拟回车，请在「文件传输助手」确认是否发出"
+        let text = "【知语测试】这条是写入并发送测试"
+        let ok = InserterProbe.setText(text)
+        // AX 写值与回车之间加最小延时并校验 AXValue 已写入，避免写值尚未生效就回车导致发空消息。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            let written = InserterProbe.composerValue() ?? ""
+            guard written.contains(text) else {
+                self.output = "写入(\(ok))后校验失败：composer 当前值为「\(written)」，未模拟回车以免发空消息"
+                return
+            }
+            InserterProbe.sendReturn()
+            self.output = "写入(\(ok))并校验通过后已模拟回车，请在「文件传输助手」确认是否发出"
+        }
+        output = "已写入(\(ok))，将在校验 AXValue 后回车，请在「文件传输助手」确认是否发出"
     }
 
-    /// 验证真实发送路径：粘贴已被证实可用，粘贴生效延时后再模拟回车发送。
+    /// 验证真实发送路径：粘贴已被证实可用，由粘贴完成回调驱动回车（不再用解耦的独立计时器）。
     func pasteAndSend() {
-        InserterProbe.pasteText("【知语测试】这条是粘贴并发送测试")
-        // 粘贴本身有 ~0.25s 延时（写剪贴板 + ⌘V），这里再留足时间等粘贴生效后回车。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            InserterProbe.sendReturn()
+        // sendReturn 由 pasteText 的 completion 回调驱动：回调在 ⌘V post 之后触发，
+        // 这里相对该时刻再留一段时间等微信处理粘贴并把文本提交到输入框，然后回车。
+        InserterProbe.pasteText("【知语测试】这条是粘贴并发送测试") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                InserterProbe.sendReturn()
+            }
         }
         output = "已触发粘贴并将在粘贴生效后回车发送，请仅在「文件传输助手」测试，确认是否发出"
     }
