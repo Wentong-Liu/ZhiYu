@@ -35,7 +35,11 @@ enum WeChatAXProbe {
         var draft: String
         var inputFrame: CGRect?
         var inputFocused: Bool
-        var rawLines: [String]   // 调试用：每条可见文本 + 其 x 坐标
+        var rawLines: [String]      // 调试用：每条可见文本 + 其 x 坐标
+        var wakeLines: [String]     // 唤醒可访问性的 rawValue 结果
+        var candidateLines: [String]  // 所有候选输入框 role + frame
+        var composerLine: String   // 选中的 composer 描述
+        var treeLines: [String]    // 完整结构树 dump
     }
 
     static func findWeChatApp() -> NSRunningApplication? {
@@ -50,6 +54,17 @@ enum WeChatAXProbe {
         guard AXIsProcessTrusted() else { return .failure(.noPermission) }
         guard let app = findWeChatApp() else { return .failure(.weChatNotRunning) }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+
+        // 【唤醒可访问性】微信 4.x 疑似 Electron/Chromium 系，AX 树默认折叠。
+        // 对 app 元素设置 AXManualAccessibility / AXEnhancedUserInterface 触发建树。
+        // 失败容错，仅记录 rawValue，不 crash。唤醒可能异步：首次点击可能只唤醒，需再点一次。
+        let r1 = AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        let r2 = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        let wakeLines = [
+            "AXManualAccessibility set -> \(r1.rawValue)",
+            "AXEnhancedUserInterface set -> \(r2.rawValue)",
+        ]
+
         guard let window = copyElement(appElement, "AXFocusedWindow")
                 ?? copyElement(appElement, "AXMainWindow") else {
             return .failure(.noWindow)
@@ -59,6 +74,25 @@ enum WeChatAXProbe {
         var texts: [(text: String, frame: CGRect)] = []
         var input: AXUIElement?
         collect(window, texts: &texts, input: &input)
+
+        // 【候选输入框收集 + composer 定位】不再取"第一个 TextField/TextArea"（会撞左上角搜索框）。
+        // 收集全部可编辑元素，选 minY 最大（最靠底部）且宽度足够的作为消息输入框 composer。
+        var editables: [(role: String, frame: CGRect)] = []
+        collectEditables(window, into: &editables)
+        let minComposerWidth: CGFloat = 120  // 宽度门槛，排除窄搜索框等
+        let composer = editables
+            .filter { $0.frame.width >= minComposerWidth }
+            .max(by: { $0.frame.minY < $1.frame.minY })
+            ?? editables.max(by: { $0.frame.minY < $1.frame.minY })
+        let candidateLines: [String] = editables.isEmpty
+            ? ["(无可编辑元素)"]
+            : editables.map { fmtFrame(role: $0.role, frame: $0.frame) }
+        let composerLine = composer.map { fmtFrame(role: $0.role, frame: $0.frame) } ?? "(未定位到 composer)"
+
+        // 【全树结构 dump】对 focusedWindow 子树逐节点输出，深度/节点数有上限防爆。
+        var treeLines: [String] = []
+        var nodeCount = 0
+        dumpTree(window, depth: 0, lines: &treeLines, nodeCount: &nodeCount)
 
         // 【Phase 1 已知局限 / 待 Phase 2 解决】
         // collect() 不加区域约束地收集窗口内全部 AXStaticText，这里再把它们一律映射为 Message
@@ -77,12 +111,12 @@ enum WeChatAXProbe {
             }
 
         let title = copyString(window, "AXTitle") ?? app.localizedName ?? "未知联系人"
+        // composer 仅记录其 frame；draft/focus 仍尽量取一个可编辑元素的值（优先 composer 对应不到则用旧 input）。
+        let inputFrame: CGRect? = composer?.frame ?? input.flatMap { frame(of: $0) }
         var draft = ""
-        var inputFrame: CGRect?
         var inputFocused = false
         if let field = input {
             draft = copyString(field, "AXValue") ?? ""
-            inputFrame = frame(of: field)
             inputFocused = copyBool(field, "AXFocused") ?? false
         }
 
@@ -92,7 +126,11 @@ enum WeChatAXProbe {
                                     draft: draft,
                                     inputFrame: inputFrame,
                                     inputFocused: inputFocused,
-                                    rawLines: rawLines))
+                                    rawLines: rawLines,
+                                    wakeLines: wakeLines,
+                                    candidateLines: candidateLines,
+                                    composerLine: composerLine,
+                                    treeLines: treeLines))
     }
 
     // MARK: - AX 辅助（供本类型与 InserterProbe 复用）
@@ -158,6 +196,71 @@ enum WeChatAXProbe {
         }
         for child in children(el) {
             collect(child, texts: &texts, input: &input)
+        }
+    }
+
+    /// 递归收集所有可编辑元素(AXTextArea/AXTextField)及其 frame。复用 frame(of:) 的安全类型守卫。
+    static func collectEditables(_ el: AXUIElement,
+                                 into out: inout [(role: String, frame: CGRect)],
+                                 depth: Int = 0) {
+        guard depth < 60 else { return }
+        let r = role(el)
+        if r == roleTextArea || r == roleTextField, let f = frame(of: el) {
+            out.append((r, f))
+        }
+        for child in children(el) {
+            collectEditables(child, into: &out, depth: depth + 1)
+        }
+    }
+
+    /// 格式化：role(+subrole) + frame。
+    private static func fmtFrame(role: String, frame: CGRect) -> String {
+        "\(role)  (\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))"
+    }
+
+    /// 全树结构 dump：缩进(depth) + AXRole(+AXSubrole) + frame + (AXValue 或 AXTitle，截断 40 字，换行替换 ⏎)。
+    /// 深度上限 60、节点上限 1200，防止爆栈/爆量。
+    static func dumpTree(_ el: AXUIElement,
+                         depth: Int,
+                         lines: inout [String],
+                         nodeCount: inout Int) {
+        guard nodeCount < 1200, depth < 60 else { return }
+        nodeCount += 1
+
+        let r = role(el)
+        var roleStr = r.isEmpty ? "(无Role)" : r
+        if let sub = copyString(el, "AXSubrole"), !sub.isEmpty {
+            roleStr += "/\(sub)"
+        }
+
+        let frameStr: String
+        if let f = frame(of: el) {
+            frameStr = "(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))"
+        } else {
+            frameStr = "(no-frame)"
+        }
+
+        // 优先 AXValue，否则 AXTitle。
+        var label = ""
+        if let v = copyString(el, "AXValue"), !v.isEmpty {
+            label = v
+        } else if let t = copyString(el, "AXTitle"), !t.isEmpty {
+            label = t
+        }
+        if !label.isEmpty {
+            label = label.replacingOccurrences(of: "\n", with: "⏎")
+                         .replacingOccurrences(of: "\r", with: "⏎")
+            if label.count > 40 {
+                label = String(label.prefix(40)) + "…"
+            }
+            label = "  「\(label)」"
+        }
+
+        let indent = String(repeating: "  ", count: depth)
+        lines.append("\(indent)\(roleStr) \(frameStr)\(label)")
+
+        for child in children(el) {
+            dumpTree(child, depth: depth + 1, lines: &lines, nodeCount: &nodeCount)
         }
     }
 }
