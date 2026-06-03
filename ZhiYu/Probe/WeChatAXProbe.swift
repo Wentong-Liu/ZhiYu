@@ -298,8 +298,7 @@ enum WeChatAXProbe {
         if r == "AXColumn" || r == "AXScrollBar" { return }
         let kids = children(el)
         if kids.isEmpty {
-            if let v = copyString(el, "AXValue"),
-               !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let v = bestText(el) {
                 out.append(v)
             }
             return
@@ -312,8 +311,7 @@ enum WeChatAXProbe {
     /// 行内下钻到第一个含非空 AXValue 的叶子，只读 AXValue。
     private static func firstNonEmptyValue(in el: AXUIElement, depth: Int) -> String? {
         guard depth < 12 else { return nil }
-        if let v = copyString(el, "AXValue"),
-           !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let v = bestText(el) {
             return v
         }
         for child in children(el) {
@@ -399,6 +397,18 @@ enum WeChatAXProbe {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, attr as CFString, &value) == .success else { return nil }
         return value as? String
+    }
+
+    /// 依次尝试多个文本属性，返回首个非空。
+    /// 微信消息气泡文字在 AXTitle/AXDescription 而非 AXValue（输入框草稿才在 AXValue）。
+    static func bestText(_ el: AXUIElement) -> String? {
+        for attr in ["AXValue", "AXTitle", "AXDescription"] {
+            if let s = copyString(el, attr),
+               !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return s
+            }
+        }
+        return nil
     }
 
     static func copyBool(_ el: AXUIElement, _ attr: String) -> Bool? {
