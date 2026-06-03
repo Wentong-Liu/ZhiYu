@@ -12,15 +12,16 @@ enum InserterProbe {
     }
 
     /// 定位微信消息输入框 composer（读/写共用同一规则）。
-    /// 在 AXUIElementCreateApplication 之后、定位 composer 之前先调用共享唤醒助手一次，
-    /// 保证写入路径与探针读取路径两条 AX 入口唤醒前置一致（否则 Chromium/Electron 系子树可能未建树）。
+    /// 在 AXUIElementCreateApplication 之后、定位 composer 之前先调用共享唤醒助手一次（两个便宜的 set 调用）。
+    /// 与快速读取口径一致：先定界到右侧会话面板再 collectEditables，避免遍历左侧会话列表巨表（性能元凶）。
     static func locateComposer() -> AXUIElement? {
         guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        _ = WeChatAXProbe.wakeAccessibility(appElement)
+        WeChatAXProbe.wakeAccessibility(appElement)
         guard let window = WeChatAXProbe.copyElement(appElement, "AXFocusedWindow")
                 ?? WeChatAXProbe.copyElement(appElement, "AXMainWindow") else { return nil }
-        let editables = WeChatAXProbe.collectEditables(window)
+        let root = WeChatAXProbe.rightPanelRoot(window: window)
+        let editables = WeChatAXProbe.collectEditables(root)
         return WeChatAXProbe.pickComposer(from: editables)?.element
     }
 

@@ -10,8 +10,14 @@ enum WeChatAXProbe {
     private static let roleStaticText = "AXStaticText"
     private static let roleTextArea = "AXTextArea"
     private static let roleTextField = "AXTextField"
-    private static let roleWebArea = "AXWebArea"
     private static let roleScrollArea = "AXScrollArea"
+    private static let roleSplitGroup = "AXSplitGroup"
+    private static let roleTable = "AXTable"
+    private static let roleRow = "AXRow"
+    private static let roleTableRow = "AXTableRow"
+
+    /// 快速读取只取最后 N 行消息。
+    private static let maxMessages = 30
 
     enum ProbeError: Error, CustomStringConvertible {
         case noPermission, weChatNotRunning, noWindow
@@ -24,24 +30,30 @@ enum WeChatAXProbe {
         }
     }
 
+    /// 说话人归属。
+    enum Speaker {
+        case me
+        case other
+        case separator  // 纯时间行 / 系统分隔，正文为时间或提示
+    }
+
     /// 一条消息（探针本地轻量类型，不依赖 ZhiYuCore）。
     struct Message {
-        let isMe: Bool
-        let text: String
+        let speaker: Speaker
+        let name: String   // 发言人名（other 才有意义；me/separator 为空）
+        let text: String   // 正文
+        var isMe: Bool { speaker == .me }
     }
 
     /// 探针读取结果（本地轻量类型，不依赖 ZhiYuCore）。
     struct ProbeResult {
+        var elapsedMs: Int          // 本次快速读取耗时（毫秒）
         var contactName: String
         var messages: [Message]
         var draft: String
         var inputFrame: CGRect?
         var inputFocused: Bool
-        var rawLines: [String]      // 调试用：每条可见文本 + 其 x 坐标
-        var wakeLines: [String]     // 唤醒可访问性的 rawValue 结果
-        var candidateLines: [String]  // 所有候选输入框 role + frame
-        var composerLine: String   // 选中的 composer 描述
-        var treeLines: [String]    // 完整结构树 dump
+        var diagnostics: [String]   // 定位/回退诊断信息
     }
 
     static func findWeChatApp() -> NSRunningApplication? {
@@ -52,10 +64,9 @@ enum WeChatAXProbe {
         return apps.first(where: { $0.localizedName == "WeChat" || $0.localizedName == "微信" })
     }
 
-    /// 【共享唤醒助手】对 app 元素设置 AXManualAccessibility / AXEnhancedUserInterface 触发建树。
-    /// 微信 4.x 疑似 Electron/Chromium 系，AX 树默认折叠；两条入口均设 kCFBooleanTrue。
-    /// 失败容错，仅记录 rawValue，不 crash。唤醒可能异步：首次调用可能只唤醒，需再调一次。
-    /// 返回日志行，供探针读取展示 / InserterProbe 写入前调用（保证两条 AX 入口唤醒前置一致）。
+    /// 【共享唤醒助手】对 app 元素设置 AXManualAccessibility / AXEnhancedUserInterface。
+    /// 这是两个便宜的 set 调用，不做整树遍历。保留以兼容不同版本；失败容错，不 crash。
+    @discardableResult
     static func wakeAccessibility(_ appElement: AXUIElement) -> [String] {
         let r1 = AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         let r2 = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
@@ -65,82 +76,289 @@ enum WeChatAXProbe {
         ]
     }
 
+    // MARK: - 快速读取（供「运行 AX 探针」按钮）
+
+    /// 快速读取路径：只导航右侧会话面板，绝不进入左侧会话列表那张巨表。
+    /// 步骤见实现内注释。健壮性：定位不到时不崩溃，输出诊断并回退。
     static func run() -> Result<ProbeResult, ProbeError> {
+        let t0 = ProcessInfo.processInfo.systemUptime
+
         guard AXIsProcessTrusted() else { return .failure(.noPermission) }
         guard let app = findWeChatApp() else { return .failure(.weChatNotRunning) }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        // 【唤醒可访问性】对 app 元素设两条 AX 入口（共享助手），触发 Chromium/Electron 系建树。
-        var wakeLines = wakeAccessibility(appElement)
+        // 便宜的两个 set 调用（无整树遍历），兼容部分版本的建树需求。
+        wakeAccessibility(appElement)
 
+        // a. focusedWindow
         guard let window = copyElement(appElement, "AXFocusedWindow")
                 ?? copyElement(appElement, "AXMainWindow") else {
             return .failure(.noWindow)
         }
 
-        // 【二次唤醒 AXWebArea 子节点】先做一次轻量遍历，收集 AXWebArea / AXScrollArea 容器节点，
-        // 对每个执行 AXManualAccessibility=true 展开其内部子树（遍历→唤醒web区→再遍历）。
-        // 遍历只读不改其它属性，深度/节点数有上限防爆。命中数与每次 rawValue 追加进 wakeLines。
-        wakeLines.append(contentsOf: wakeWebAreas(window))
+        var diagnostics: [String] = []
 
-        let windowFrame = frame(of: window)
-        var texts: [(text: String, frame: CGRect)] = []
-        var input: AXUIElement?
-        collect(window, texts: &texts, input: &input)
+        // b. 主 AXSplitGroup -> 其【直接子节点】里的右侧会话面板 AXSplitGroup。
+        //    全程不进入左侧会话列表的 AXScrollArea/AXTable（它是主 split group 的另一个子节点）。
+        let rightPanel = locateRightPanel(window: window, diagnostics: &diagnostics)
 
-        // 【候选输入框收集 + composer 定位】不再取"第一个 TextField/TextArea"（会撞左上角搜索框）。
-        // 收集全部可编辑元素，选 minY 最大（最靠底部）且宽度足够的作为消息输入框 composer。
-        let editables = collectEditables(window)
-        let composer = pickComposer(from: editables)
-        let candidateLines: [String] = editables.isEmpty
-            ? ["(无可编辑元素)"]
-            : editables.map { fmtFrame(role: $0.role, frame: $0.frame) }
-        let composerLine = composer.map { fmtFrame(role: $0.role, frame: $0.frame) } ?? "(未定位到 composer)"
-
-        // 【全树结构 dump】对 focusedWindow 子树逐节点输出，深度/节点数有上限防爆。
-        var treeLines: [String] = []
-        var nodeCount = 0
-        dumpTree(window, depth: 0, lines: &treeLines, nodeCount: &nodeCount)
-
-        // 【Phase 1 已知局限 / 待 Phase 2 解决】
-        // collect() 不加区域约束地收集窗口内全部 AXStaticText，这里再把它们一律映射为 Message
-        // 并按 midX 分左右。微信窗口的左侧会话列表项、联系人名、时间戳、"以下为新消息"等系统文本
-        // 同样是 AXStaticText，会被误当作消息混入，且其 x 位置会被错误标注 me/other（spec 5.1/8 标注的
-        // 最高风险：说话人归属准确率需实测）。Phase 1 探针只验证可行性，rawLines 输出 x 坐标供人工判读，
-        // 该污染在收尾结论里如实记录即可。Phase 2 WeChatReader 应：先定位聊天消息列表容器
-        // (AXScrollArea/AXTable 等) 再在其子树内收集 AXStaticText，排除侧栏/标题栏；说话人区分改用
-        // 气泡容器(消息行)的 frame 而非纯文本 midX，可显著降噪。
-        let midX = windowFrame?.midX ?? 0
-        let messages: [Message] = texts
-            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { item in
-                let isMe = item.frame.midX > midX
-                return Message(isMe: isMe, text: item.text)
-            }
-
-        let title = copyString(window, "AXTitle") ?? app.localizedName ?? "未知联系人"
-        // 读/写口径统一：draft/focus 都从选中的 composer 元素读取，而非 collect() 抓到的第一个
-        // 可编辑元素（很可能是左上角搜索框）。无 composer 时回退到旧 input，至少不报告空。
-        let composerElement = composer?.element ?? input
-        let inputFrame: CGRect? = composer?.frame ?? input.flatMap { frame(of: $0) }
-        var draft = ""
-        var inputFocused = false
-        if let field = composerElement {
-            draft = copyString(field, "AXValue") ?? ""
-            inputFocused = copyBool(field, "AXFocused") ?? false
+        // 没定位到右侧面板：回退（不崩溃），仍返回耗时与诊断。
+        guard let panel = rightPanel else {
+            let elapsed = Int((ProcessInfo.processInfo.systemUptime - t0) * 1000)
+            return .success(ProbeResult(
+                elapsedMs: elapsed,
+                contactName: copyString(window, "AXTitle") ?? app.localizedName ?? "未知联系人",
+                messages: [],
+                draft: "",
+                inputFrame: nil,
+                inputFocused: false,
+                diagnostics: diagnostics))
         }
 
-        let rawLines = texts.map { "x=\(Int($0.frame.midX))  \($0.text)" }
-        return .success(ProbeResult(contactName: title,
-                                    messages: messages,
-                                    draft: draft,
-                                    inputFrame: inputFrame,
-                                    inputFocused: inputFocused,
-                                    rawLines: rawLines,
-                                    wakeLines: wakeLines,
-                                    candidateLines: candidateLines,
-                                    composerLine: composerLine,
-                                    treeLines: treeLines))
+        // c. 在右侧面板小子树里定位三个目标。
+        let messageTable = locateMessageTable(in: panel)
+        let composer = locateComposerInPanel(panel)
+        let title = locateContactTitle(in: panel)
+            ?? copyString(window, "AXTitle")
+            ?? app.localizedName
+            ?? "未知联系人"
+
+        // d/e. 读消息：遍历消息表的行（文档顺序=时间顺序），只取最后 N 行，只读 AXValue 并解析说话人。
+        var messages: [Message] = []
+        if let table = messageTable {
+            messages = readMessages(from: table)
+        } else {
+            diagnostics.append("未定位到消息列表（结构可能已变），请用『完整结构树（诊断·慢）』诊断")
+        }
+
+        // f. composer：读 AXValue=草稿、frame、AXFocused。
+        var draft = ""
+        var inputFocused = false
+        var inputFrame: CGRect? = nil
+        if let c = composer {
+            draft = copyString(c, "AXValue") ?? ""
+            inputFocused = copyBool(c, "AXFocused") ?? false
+            inputFrame = frame(of: c)
+        } else {
+            diagnostics.append("未定位到输入框 composer（结构可能已变）")
+        }
+
+        // g. 计时。
+        let elapsed = Int((ProcessInfo.processInfo.systemUptime - t0) * 1000)
+
+        return .success(ProbeResult(
+            elapsedMs: elapsed,
+            contactName: title,
+            messages: messages,
+            draft: draft,
+            inputFrame: inputFrame,
+            inputFocused: inputFocused,
+            diagnostics: diagnostics))
+    }
+
+    /// 定位右侧会话面板：
+    /// 1) 在窗口浅层子节点里找 role==AXSplitGroup 的主 split group。
+    /// 2) 在主 split group 的【直接子节点】里找 role==AXSplitGroup 的那个作为右侧面板。
+    /// 绝不下钻左侧会话列表的 AXScrollArea/AXTable（即主 split group 的另一个子节点）。
+    private static func locateRightPanel(window: AXUIElement,
+                                         diagnostics: inout [String]) -> AXUIElement? {
+        // 浅层查找主 split group：窗口直接子节点优先；个别版本可能再包一层，限深度 3 的浅查。
+        guard let mainSplit = findSplitGroupShallow(window, depth: 0, maxDepth: 3) else {
+            diagnostics.append("未定位到主 AXSplitGroup（结构可能已变），请用『完整结构树（诊断·慢）』诊断")
+            return nil
+        }
+
+        // 主 split group 的直接子节点里找 AXSplitGroup。可能有多个，取 minX 最大（最靠右）的那个。
+        let directChildren = children(mainSplit)
+        let nestedSplits = directChildren.filter { role($0) == roleSplitGroup }
+        guard !nestedSplits.isEmpty else {
+            diagnostics.append("未在主 AXSplitGroup 直接子节点中找到右侧面板 AXSplitGroup（结构可能已变），请用『完整结构树（诊断·慢）』诊断")
+            return nil
+        }
+        // 右侧面板应是 minX 最大者（x≈359 vs 左侧≈106）。读 frame 仅对这几个候选做，开销可忽略。
+        let panel = nestedSplits.max(by: { (frame(of: $0)?.minX ?? 0) < (frame(of: $1)?.minX ?? 0) })
+        return panel ?? nestedSplits.first
+    }
+
+    /// 浅层查找第一个 AXSplitGroup（限深度，不会进入巨表，因为巨表在 split group 内部）。
+    private static func findSplitGroupShallow(_ el: AXUIElement, depth: Int, maxDepth: Int) -> AXUIElement? {
+        if role(el) == roleSplitGroup { return el }
+        guard depth < maxDepth else { return nil }
+        for child in children(el) {
+            // 只在尚未命中 split group 的浅层结构里下钻；命中后立刻返回，不会进入其内部巨表。
+            if let found = findSplitGroupShallow(child, depth: depth + 1, maxDepth: maxDepth) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    /// 在右侧面板小子树里定位消息列表：含 AXTable 的 AXScrollArea -> 其内的 AXTable。
+    /// 右侧面板是小子树，有界遍历安全。
+    private static func locateMessageTable(in panel: AXUIElement) -> AXUIElement? {
+        var visited = 0
+        // 先找直接/浅层 AXScrollArea，其子树里含 AXTable 的就是消息列表。
+        return findMessageTable(panel, depth: 0, visited: &visited)
+    }
+
+    private static func findMessageTable(_ el: AXUIElement, depth: Int, visited: inout Int) -> AXUIElement? {
+        guard depth < 40, visited < 2000 else { return nil }
+        visited += 1
+        if role(el) == roleScrollArea {
+            // 在这个 scroll area 子树里找 AXTable。
+            if let table = findFirstTable(el, depth: 0, visited: &visited) {
+                return table
+            }
+        }
+        for child in children(el) {
+            if let table = findMessageTable(child, depth: depth + 1, visited: &visited) {
+                return table
+            }
+        }
+        return nil
+    }
+
+    private static func findFirstTable(_ el: AXUIElement, depth: Int, visited: inout Int) -> AXUIElement? {
+        guard depth < 20, visited < 2000 else { return nil }
+        visited += 1
+        if role(el) == roleTable { return el }
+        for child in children(el) {
+            if let table = findFirstTable(child, depth: depth + 1, visited: &visited) {
+                return table
+            }
+        }
+        return nil
+    }
+
+    /// 联系人标题：右侧面板顶部的 AXStaticText。取 minY 最小（最靠上）且非空者。
+    private static func locateContactTitle(in panel: AXUIElement) -> String? {
+        var candidates: [(text: String, minY: CGFloat)] = []
+        var visited = 0
+        collectTopStaticTexts(panel, depth: 0, visited: &visited, into: &candidates)
+        guard !candidates.isEmpty else { return nil }
+        // 顶部标题 = minY 最小。
+        let title = candidates.min(by: { $0.minY < $1.minY })?.text
+        return title?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 收集右侧面板里的 AXStaticText（不进入消息表与滚动区，避免噪声/开销）。
+    private static func collectTopStaticTexts(_ el: AXUIElement,
+                                              depth: Int,
+                                              visited: inout Int,
+                                              into out: inout [(text: String, minY: CGFloat)]) {
+        guard depth < 12, visited < 400 else { return }
+        visited += 1
+        let r = role(el)
+        // 不下钻 ScrollArea/Table（消息列表、输入区滚动），标题是面板直挂的 AXStaticText。
+        if r == roleScrollArea || r == roleTable { return }
+        if r == roleStaticText, let s = copyString(el, "AXValue"),
+           !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.append((s, frame(of: el)?.minY ?? .greatestFiniteMagnitude))
+        }
+        for child in children(el) {
+            collectTopStaticTexts(child, depth: depth + 1, visited: &visited, into: &out)
+        }
+    }
+
+    /// 在右侧面板里用统一规则定位 composer（与读取口径一致，复用 collectEditables/pickComposer）。
+    private static func locateComposerInPanel(_ panel: AXUIElement) -> AXUIElement? {
+        let editables = collectEditables(panel)
+        return pickComposer(from: editables)?.element
+    }
+
+    /// 读消息：遍历消息表的 AXRow/AXTableRow（文档顺序=时间顺序），每行下钻到含非空 AXValue 的叶子，
+    /// 只读 AXValue（不逐节点读 position/size），解析说话人，最后只取最后 N 行。
+    private static func readMessages(from table: AXUIElement) -> [Message] {
+        let rows = children(table).filter {
+            let r = role($0)
+            return r == roleRow || r == roleTableRow
+        }
+        var parsed: [Message] = []
+        for row in rows {
+            guard let value = firstNonEmptyValue(in: row, depth: 0) else { continue }
+            parsed.append(parseMessage(value))
+        }
+        if parsed.count > maxMessages {
+            return Array(parsed.suffix(maxMessages))
+        }
+        return parsed
+    }
+
+    /// 行内下钻到第一个含非空 AXValue 的叶子，只读 AXValue。
+    private static func firstNonEmptyValue(in el: AXUIElement, depth: Int) -> String? {
+        guard depth < 12 else { return nil }
+        if let v = copyString(el, "AXValue"),
+           !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return v
+        }
+        for child in children(el) {
+            if let v = firstNonEmptyValue(in: child, depth: depth + 1) {
+                return v
+            }
+        }
+        return nil
+    }
+
+    // MARK: - 说话人 / 正文解析
+
+    /// 解析一条消息 value：
+    /// - 以 "我说:" 或 "我:" 开头 -> me，正文=分隔符之后。
+    /// - 否则匹配 "^(.+?)说[:：]" 或 "^(.+?)[:：]" -> other，name=捕获，正文=分隔符之后。
+    /// - 纯时间行 / 空 -> separator。
+    /// 冒号兼容半角 : 与全角 ：。
+    static func parseMessage(_ raw: String) -> Message {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            return Message(speaker: .separator, name: "", text: raw)
+        }
+
+        // 纯时间 / 日期分隔行：02:33 / 03:03 / 昨天 20:38 / 上午 9:41 等。
+        if isTimeSeparator(value) {
+            return Message(speaker: .separator, name: "", text: value)
+        }
+
+        // 我说: / 我:（半/全角冒号）
+        for prefix in ["我说:", "我说：", "我:", "我："] {
+            if value.hasPrefix(prefix) {
+                let body = String(value.dropFirst(prefix.count))
+                return Message(speaker: .me, name: "", text: body)
+            }
+        }
+
+        // 对方：^(.+?)说[:：]  优先，其次 ^(.+?)[:：]
+        if let (name, body) = matchSpeaker(value, pattern: "^(.+?)说[:：](.*)$")
+            ?? matchSpeaker(value, pattern: "^(.+?)[:：](.*)$") {
+            return Message(speaker: .other, name: name, text: body)
+        }
+
+        // 无分隔符：无法解析说话人，按 other 整条作为正文，name 留空。
+        return Message(speaker: .other, name: "", text: value)
+    }
+
+    /// 用正则取捕获组 1=name、组 2=body（已 trim）。
+    private static func matchSpeaker(_ value: String, pattern: String) -> (name: String, body: String)? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
+            return nil
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        guard let m = regex.firstMatch(in: value, options: [], range: range),
+              m.numberOfRanges >= 3,
+              let nameRange = Range(m.range(at: 1), in: value),
+              let bodyRange = Range(m.range(at: 2), in: value) else { return nil }
+        let name = String(value[nameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = String(value[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        return (name, body)
+    }
+
+    /// 判断纯时间 / 日期分隔行（如 "02:33" / "03:03" / "昨天 20:38" / "上午 9:41" / "星期三 下午 3:20"）。
+    private static func isTimeSeparator(_ value: String) -> Bool {
+        let pattern = "^(昨天|前天|今天|上午|下午|凌晨|早上|中午|晚上|星期[一二三四五六日天]|周[一二三四五六日天]|[0-9]{1,4}[年/月-]|[\\s])*[0-9]{1,2}[:：][0-9]{2}$"
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            if regex.firstMatch(in: value, options: [], range: range) != nil { return true }
+        }
+        return false
     }
 
     // MARK: - AX 辅助（供本类型与 InserterProbe 复用）
@@ -193,70 +411,6 @@ enum WeChatAXProbe {
         return CGRect(origin: point, size: size)
     }
 
-    /// 【二次唤醒 web 区】轻量遍历子树，收集 role == "AXWebArea"（以及 "AXScrollArea" 容器）节点，
-    /// 对每个命中节点设 AXManualAccessibility=true 展开其内部子树。只读其它属性，不改它们。
-    /// 深度/节点上限防爆。返回日志行：命中编号 + 类型 + rawValue（如 "AXWebArea#1 manual-a11y -> 0"）；
-    /// 若一个容器都没找到，返回一条诊断行（这本身就是重要诊断信息）。
-    static func wakeWebAreas(_ root: AXUIElement) -> [String] {
-        var targets: [(role: String, element: AXUIElement)] = []
-        var visited = 0
-        collectWakeTargets(root, depth: 0, visited: &visited, into: &targets)
-
-        guard !targets.isEmpty else {
-            return ["未发现 AXWebArea/AXScrollArea 容器"]
-        }
-
-        var lines: [String] = ["web区容器命中 \(targets.count) 个"]
-        var webIndex = 0
-        var scrollIndex = 0
-        for t in targets {
-            let label: String
-            if t.role == roleWebArea {
-                webIndex += 1
-                label = "AXWebArea#\(webIndex)"
-            } else {
-                scrollIndex += 1
-                label = "AXScrollArea#\(scrollIndex)"
-            }
-            let rc = AXUIElementSetAttributeValue(t.element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-            lines.append("\(label) manual-a11y -> \(rc.rawValue)")
-        }
-        return lines
-    }
-
-    /// 轻量遍历收集待唤醒容器：命中 AXWebArea / AXScrollArea。只读 role + children，不改任何属性。
-    /// 深度上限 60、访问节点上限 1500，防爆栈/爆量。
-    private static func collectWakeTargets(_ el: AXUIElement,
-                                           depth: Int,
-                                           visited: inout Int,
-                                           into out: inout [(role: String, element: AXUIElement)]) {
-        guard depth < 60, visited < 1500 else { return }
-        visited += 1
-        let r = role(el)
-        if r == roleWebArea || r == roleScrollArea {
-            out.append((r, el))
-        }
-        for child in children(el) {
-            collectWakeTargets(child, depth: depth + 1, visited: &visited, into: &out)
-        }
-    }
-
-    /// 递归遍历：收集所有 AXStaticText 文本 + 坐标；记录第一个文本输入控件。
-    static func collect(_ el: AXUIElement,
-                        texts: inout [(text: String, frame: CGRect)],
-                        input: inout AXUIElement?) {
-        let r = role(el)
-        if r == roleStaticText, let s = copyString(el, "AXValue"), !s.isEmpty {
-            texts.append((s, frame(of: el) ?? .zero))
-        }
-        if input == nil, (r == roleTextArea || r == roleTextField) {
-            input = el
-        }
-        for child in children(el) {
-            collect(child, texts: &texts, input: &input)
-        }
-    }
-
     /// 可编辑元素候选：保留 AXUIElement 引用，供后续读 AXValue/AXFocused 或写入复用。
     struct Editable {
         let element: AXUIElement
@@ -265,6 +419,7 @@ enum WeChatAXProbe {
     }
 
     /// 递归收集所有可编辑元素(AXTextArea/AXTextField)，保留元素引用 + frame。复用 frame(of:) 的安全类型守卫。
+    /// 注意：调用方应传入右侧面板小子树根，避免遍历整窗口（左侧巨表）。
     static func collectEditables(_ el: AXUIElement) -> [Editable] {
         var out: [Editable] = []
         collectEditables(el, into: &out, depth: 0)
@@ -294,18 +449,37 @@ enum WeChatAXProbe {
             ?? editables.max(by: { $0.frame.minY < $1.frame.minY })
     }
 
-    /// 格式化：role(+subrole) + frame。
-    private static func fmtFrame(role: String, frame: CGRect) -> String {
-        "\(role)  (\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))"
+    /// 【写入路径用】定位右侧会话面板根（供 InserterProbe.locateComposer 复用，口径与快速读取一致）。
+    /// 找不到则回退到窗口本身（至少不返回 nil，让上层用 collectEditables 兜底）。
+    static func rightPanelRoot(window: AXUIElement) -> AXUIElement {
+        var diag: [String] = []
+        return locateRightPanel(window: window, diagnostics: &diag) ?? window
     }
 
+    // MARK: - 完整结构树 dump（诊断·慢，单独按钮专用，正常路径不调用）
+
     /// 全树结构 dump：缩进(depth) + AXRole(+AXSubrole) + frame + (AXValue 或 AXTitle，截断 40 字，换行替换 ⏎)。
-    /// 深度上限 60、节点上限 1200，防止爆栈/爆量。
-    static func dumpTree(_ el: AXUIElement,
-                         depth: Int,
-                         lines: inout [String],
-                         nodeCount: inout Int) {
-        guard nodeCount < 1200, depth < 60 else { return }
+    /// 深度上限 60、节点上限 2000，防止爆栈/爆量。会遍历左侧巨表，仅供诊断手动触发。
+    static func dumpFullTree() -> Result<[String], ProbeError> {
+        guard AXIsProcessTrusted() else { return .failure(.noPermission) }
+        guard let app = findWeChatApp() else { return .failure(.weChatNotRunning) }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        wakeAccessibility(appElement)
+        guard let window = copyElement(appElement, "AXFocusedWindow")
+                ?? copyElement(appElement, "AXMainWindow") else {
+            return .failure(.noWindow)
+        }
+        var lines: [String] = []
+        var nodeCount = 0
+        dumpTree(window, depth: 0, lines: &lines, nodeCount: &nodeCount)
+        return .success(lines)
+    }
+
+    private static func dumpTree(_ el: AXUIElement,
+                                 depth: Int,
+                                 lines: inout [String],
+                                 nodeCount: inout Int) {
+        guard nodeCount < 2000, depth < 60 else { return }
         nodeCount += 1
 
         let r = role(el)

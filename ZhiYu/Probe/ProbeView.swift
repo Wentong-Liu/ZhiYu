@@ -10,26 +10,41 @@ final class ProbeViewModel: ObservableObject {
     func runAXProbe() {
         switch WeChatAXProbe.run() {
         case .success(let r):
-            var lines = [
-                "提示: 首次点击运行可能只是唤醒可访问性，请再点一次「运行 AX 探针」",
-                "—— 唤醒可访问性结果 (0 = 成功) ——",
-            ]
-            lines += r.wakeLines
+            var lines = ["耗时: \(r.elapsedMs) ms"]
+            if !r.diagnostics.isEmpty {
+                lines.append("—— 诊断 ——")
+                lines += r.diagnostics
+            }
             lines.append("")
             lines.append("联系人: \(r.contactName)")
-            lines.append("AXStaticText 命中数: \(r.rawLines.count)")
             lines.append("输入框焦点: \(r.inputFocused)")
             lines.append("草稿: 「\(r.draft)」")
-            lines.append("—— 候选输入框 ——")
-            lines += r.candidateLines
-            lines.append("选中 composer: \(r.composerLine)")
             lines.append("composer frame: \(r.inputFrame.map { "\($0)" } ?? "nil")")
-            lines.append("—— 解析后的消息 (\(r.messages.count)) ——")
-            lines += r.messages.map { "\($0.isMe ? "我  " : "对方") | \($0.text)" }
-            lines.append("—— 原始可见文本 + x 坐标 ——")
-            lines += r.rawLines
-            lines.append("—— 完整结构树 dump (\(r.treeLines.count) 节点) ——")
-            lines += r.treeLines
+            lines.append("—— 解析后的消息 (最后 \(r.messages.count) 行) ——")
+            lines += r.messages.map { m in
+                switch m.speaker {
+                case .me: return "我   | \(m.text)"
+                case .other:
+                    let who = m.name.isEmpty ? "对方" : m.name
+                    return "\(who) | \(m.text)"
+                case .separator: return "——— \(m.text) ———"
+                }
+            }
+            output = lines.joined(separator: "\n")
+        case .failure(let e):
+            output = "失败: \(e)"
+        }
+    }
+
+    /// 整树遍历诊断：会遍历左侧巨表，慢，仅手动触发用于排查结构变化。
+    func dumpFullTree() {
+        let t0 = ProcessInfo.processInfo.systemUptime
+        switch WeChatAXProbe.dumpFullTree() {
+        case .success(let treeLines):
+            let elapsed = Int((ProcessInfo.processInfo.systemUptime - t0) * 1000)
+            var lines = ["耗时: \(elapsed) ms（诊断·慢，含左侧巨表）"]
+            lines.append("—— 完整结构树 dump (\(treeLines.count) 节点) ——")
+            lines += treeLines
             output = lines.joined(separator: "\n")
         case .failure(let e):
             output = "失败: \(e)"
@@ -93,6 +108,9 @@ struct ProbeView: View {
                 Button("写入并发送") { vm.insertAndSend() }
                 Button("粘贴并发送") { vm.pasteAndSend() }
                 Button("启用快捷键 ⌥⌘R") { vm.enableHotkey() }
+            }
+            HStack {
+                Button("完整结构树（诊断·慢）") { vm.dumpFullTree() }
             }
             ScrollView {
                 Text(vm.output)
