@@ -10,6 +10,8 @@ enum WeChatAXProbe {
     private static let roleStaticText = "AXStaticText"
     private static let roleTextArea = "AXTextArea"
     private static let roleTextField = "AXTextField"
+    private static let roleWebArea = "AXWebArea"
+    private static let roleScrollArea = "AXScrollArea"
 
     enum ProbeError: Error, CustomStringConvertible {
         case noPermission, weChatNotRunning, noWindow
@@ -50,25 +52,36 @@ enum WeChatAXProbe {
         return apps.first(where: { $0.localizedName == "WeChat" || $0.localizedName == "微信" })
     }
 
+    /// 【共享唤醒助手】对 app 元素设置 AXManualAccessibility / AXEnhancedUserInterface 触发建树。
+    /// 微信 4.x 疑似 Electron/Chromium 系，AX 树默认折叠；两条入口均设 kCFBooleanTrue。
+    /// 失败容错，仅记录 rawValue，不 crash。唤醒可能异步：首次调用可能只唤醒，需再调一次。
+    /// 返回日志行，供探针读取展示 / InserterProbe 写入前调用（保证两条 AX 入口唤醒前置一致）。
+    static func wakeAccessibility(_ appElement: AXUIElement) -> [String] {
+        let r1 = AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        let r2 = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        return [
+            "AXManualAccessibility set -> \(r1.rawValue)",
+            "AXEnhancedUserInterface set -> \(r2.rawValue)",
+        ]
+    }
+
     static func run() -> Result<ProbeResult, ProbeError> {
         guard AXIsProcessTrusted() else { return .failure(.noPermission) }
         guard let app = findWeChatApp() else { return .failure(.weChatNotRunning) }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        // 【唤醒可访问性】微信 4.x 疑似 Electron/Chromium 系，AX 树默认折叠。
-        // 对 app 元素设置 AXManualAccessibility / AXEnhancedUserInterface 触发建树。
-        // 失败容错，仅记录 rawValue，不 crash。唤醒可能异步：首次点击可能只唤醒，需再点一次。
-        let r1 = AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        let r2 = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        let wakeLines = [
-            "AXManualAccessibility set -> \(r1.rawValue)",
-            "AXEnhancedUserInterface set -> \(r2.rawValue)",
-        ]
+        // 【唤醒可访问性】对 app 元素设两条 AX 入口（共享助手），触发 Chromium/Electron 系建树。
+        var wakeLines = wakeAccessibility(appElement)
 
         guard let window = copyElement(appElement, "AXFocusedWindow")
                 ?? copyElement(appElement, "AXMainWindow") else {
             return .failure(.noWindow)
         }
+
+        // 【二次唤醒 AXWebArea 子节点】先做一次轻量遍历，收集 AXWebArea / AXScrollArea 容器节点，
+        // 对每个执行 AXManualAccessibility=true 展开其内部子树（遍历→唤醒web区→再遍历）。
+        // 遍历只读不改其它属性，深度/节点数有上限防爆。命中数与每次 rawValue 追加进 wakeLines。
+        wakeLines.append(contentsOf: wakeWebAreas(window))
 
         let windowFrame = frame(of: window)
         var texts: [(text: String, frame: CGRect)] = []
@@ -178,6 +191,54 @@ enum WeChatAXProbe {
         guard AXValueGetValue(posV, .cgPoint, &point),
               AXValueGetValue(sizeV, .cgSize, &size) else { return nil }
         return CGRect(origin: point, size: size)
+    }
+
+    /// 【二次唤醒 web 区】轻量遍历子树，收集 role == "AXWebArea"（以及 "AXScrollArea" 容器）节点，
+    /// 对每个命中节点设 AXManualAccessibility=true 展开其内部子树。只读其它属性，不改它们。
+    /// 深度/节点上限防爆。返回日志行：命中编号 + 类型 + rawValue（如 "AXWebArea#1 manual-a11y -> 0"）；
+    /// 若一个容器都没找到，返回一条诊断行（这本身就是重要诊断信息）。
+    static func wakeWebAreas(_ root: AXUIElement) -> [String] {
+        var targets: [(role: String, element: AXUIElement)] = []
+        var visited = 0
+        collectWakeTargets(root, depth: 0, visited: &visited, into: &targets)
+
+        guard !targets.isEmpty else {
+            return ["未发现 AXWebArea/AXScrollArea 容器"]
+        }
+
+        var lines: [String] = ["web区容器命中 \(targets.count) 个"]
+        var webIndex = 0
+        var scrollIndex = 0
+        for t in targets {
+            let label: String
+            if t.role == roleWebArea {
+                webIndex += 1
+                label = "AXWebArea#\(webIndex)"
+            } else {
+                scrollIndex += 1
+                label = "AXScrollArea#\(scrollIndex)"
+            }
+            let rc = AXUIElementSetAttributeValue(t.element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            lines.append("\(label) manual-a11y -> \(rc.rawValue)")
+        }
+        return lines
+    }
+
+    /// 轻量遍历收集待唤醒容器：命中 AXWebArea / AXScrollArea。只读 role + children，不改任何属性。
+    /// 深度上限 60、访问节点上限 1500，防爆栈/爆量。
+    private static func collectWakeTargets(_ el: AXUIElement,
+                                           depth: Int,
+                                           visited: inout Int,
+                                           into out: inout [(role: String, element: AXUIElement)]) {
+        guard depth < 60, visited < 1500 else { return }
+        visited += 1
+        let r = role(el)
+        if r == roleWebArea || r == roleScrollArea {
+            out.append((r, el))
+        }
+        for child in children(el) {
+            collectWakeTargets(child, depth: depth + 1, visited: &visited, into: &out)
+        }
     }
 
     /// 递归遍历：收集所有 AXStaticText 文本 + 坐标；记录第一个文本输入控件。
