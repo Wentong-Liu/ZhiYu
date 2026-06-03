@@ -28,6 +28,17 @@ final class ProbeViewModel: ObservableObject {
         let ok = InserterProbe.setText("【知语测试】这条是 AX 写入测试")
         output = "AX 写入结果: \(ok)（去微信输入框看是否出现文本）"
     }
+
+    func pasteViaClipboard() {
+        InserterProbe.pasteText("【知语测试】这条是粘贴兜底测试")
+        output = "已触发粘贴（去微信输入框看是否出现文本）"
+    }
+
+    func insertAndSend() {
+        let ok = InserterProbe.setText("【知语测试】这条是写入并发送测试")
+        InserterProbe.sendReturn()
+        output = "写入(\(ok))并已模拟回车，请在「文件传输助手」确认是否发出"
+    }
 }
 
 struct ProbeView: View {
@@ -38,6 +49,8 @@ struct ProbeView: View {
             HStack {
                 Button("运行 AX 探针") { vm.runAXProbe() }
                 Button("AX 写入输入框") { vm.insertViaAX() }
+                Button("粘贴兜底") { vm.pasteViaClipboard() }
+                Button("写入并发送") { vm.insertAndSend() }
             }
             ScrollView {
                 Text(vm.output)
