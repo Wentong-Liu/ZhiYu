@@ -637,6 +637,8 @@ git commit -m "feat(app): 辅助功能权限检查与引导" -m "Co-Authored-By:
 
 ## Task 8：微信 AX 读取探针 `WeChatAXProbe`
 
+> ⚠️ **实际实现以顶部「执行说明」为准**：探针不 `import ZhiYuCore`，用本地 `Message`/`ProbeResult`；下方代码块里的 `ChatContext`/`ChatMessage`/`r.context.*` 为旧示意，已被覆盖。
+>
 > 核心可行性验证之一：能否从微信 AX 树读到联系人、可见消息（并按 x 坐标区分我/对方）、输入框 frame/焦点/草稿。
 
 **Files:**
@@ -802,6 +804,8 @@ git commit -m "feat(probe): 微信 AX 读取探针 WeChatAXProbe" -m "Co-Authore
 ---
 
 ## Task 9：探针窗口接 AX 探针并展示
+
+> ⚠️ 下方代码块为旧示意；实际按顶部「执行说明」用本地类型渲染（`r.contactName` / `r.draft` / `r.messages`(含 `isMe`,`text`) / `r.rawLines`），不 `import ZhiYuCore`、不访问 `r.context.*`。
 
 **Files:**
 - Modify: `ZhiYu/Probe/ProbeView.swift`
