@@ -5,6 +5,8 @@ import Combine
 final class ProbeViewModel: ObservableObject {
     @Published var output: String = "把微信切到某个会话，再点「运行 AX 探针」"
 
+    private let hotkey = GlobalHotkey()
+
     func runAXProbe() {
         switch WeChatAXProbe.run() {
         case .success(let r):
@@ -39,6 +41,12 @@ final class ProbeViewModel: ObservableObject {
         InserterProbe.sendReturn()
         output = "写入(\(ok))并已模拟回车，请在「文件传输助手」确认是否发出"
     }
+
+    func enableHotkey() {
+        hotkey.onTrigger = { [weak self] in self?.runAXProbe() }
+        hotkey.start()
+        output = "已启用全局快捷键 ⌥⌘R：切到微信任意会话后按它，应自动跑一次 AX 探针并刷新这里"
+    }
 }
 
 struct ProbeView: View {
@@ -51,6 +59,7 @@ struct ProbeView: View {
                 Button("AX 写入输入框") { vm.insertViaAX() }
                 Button("粘贴兜底") { vm.pasteViaClipboard() }
                 Button("写入并发送") { vm.insertAndSend() }
+                Button("启用快捷键 ⌥⌘R") { vm.enableHotkey() }
             }
             ScrollView {
                 Text(vm.output)
