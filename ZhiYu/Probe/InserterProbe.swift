@@ -31,6 +31,25 @@ enum InserterProbe {
         return WeChatAXProbe.copyString(field, "AXValue")
     }
 
+    /// AX 写入后用于发送前的「激活 + 聚焦」：
+    /// - locateComposer() 拿到底部 composer 元素；
+    /// - 对其设 AXFocused = true 让输入框获得键盘焦点（容错：部分实现不支持该属性，
+    ///   返回非 .success 不视为失败、不崩溃，仅靠激活 + 既有焦点兜底）；
+    /// - findWeChatApp()?.activate() 把微信切到前台，使后续 sendReturn 的回车进入微信而非探针窗口。
+    /// 返回是否成功拿到 composer 元素（拿不到说明定位失败，调用方应避免回车）。
+    @discardableResult
+    static func focusComposerAndActivate() -> Bool {
+        guard let composer = locateComposer() else {
+            // 拿不到 composer 也至少把微信切前台，便于排查。
+            WeChatAXProbe.findWeChatApp()?.activate()
+            return false
+        }
+        // AXFocused 设置可能返回 kAXErrorAttributeUnsupported 等错误，容错处理。
+        _ = AXUIElementSetAttributeValue(composer, "AXFocused" as CFString, kCFBooleanTrue)
+        WeChatAXProbe.findWeChatApp()?.activate()
+        return true
+    }
+
     /// 兜底：写剪贴板 + 模拟 ⌘V 粘贴到当前焦点（用后恢复原剪贴板）。
     /// completion 在 ⌘V 事件 post 之后触发——调用方（如 pasteAndSend）应在该回调里再
     /// 延时回车，而不是用一个与本函数内部 0.25s 解耦的独立计时器。回调在主线程执行。

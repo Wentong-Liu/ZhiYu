@@ -63,18 +63,21 @@ final class ProbeViewModel: ObservableObject {
 
     func insertAndSend() {
         let text = "【知语测试】这条是写入并发送测试"
+        // a. AX 写入文本。
         let ok = InserterProbe.setText(text)
-        // AX 写值与回车之间加最小延时并校验 AXValue 已写入，避免写值尚未生效就回车导致发空消息。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        // b. 激活微信 + 聚焦 composer：之前只写值没激活/聚焦，回车进了探针窗口导致不发送。
+        let located = InserterProbe.focusComposerAndActivate()
+        // c. 留时间让激活/聚焦生效，再校验 AXValue 已写入后回车，避免写值未生效就回车发空消息。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             let written = InserterProbe.composerValue() ?? ""
             guard written.contains(text) else {
-                self.output = "写入(\(ok))后校验失败：composer 当前值为「\(written)」，未模拟回车以免发空消息"
+                self.output = "写入(\(ok))/定位(\(located))后校验失败：composer 当前值为「\(written)」，未模拟回车以免发空消息"
                 return
             }
             InserterProbe.sendReturn()
-            self.output = "写入(\(ok))并校验通过后已模拟回车，请在「文件传输助手」确认是否发出"
+            self.output = "写入(\(ok))并激活聚焦校验通过后已模拟回车，请在「文件传输助手」确认是否发出"
         }
-        output = "已写入(\(ok))，将在校验 AXValue 后回车，请在「文件传输助手」确认是否发出"
+        output = "已写入(\(ok))/定位(\(located))，将在激活聚焦后校验 AXValue 再回车，请在「文件传输助手」确认是否发出"
     }
 
     /// 验证真实发送路径：粘贴已被证实可用，由粘贴完成回调驱动回车（不再用解耦的独立计时器）。
