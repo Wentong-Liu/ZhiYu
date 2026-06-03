@@ -23,6 +23,11 @@ final class ProbeViewModel: ObservableObject {
             output = "失败: \(e)"
         }
     }
+
+    func insertViaAX() {
+        let ok = InserterProbe.setText("【知语测试】这条是 AX 写入测试")
+        output = "AX 写入结果: \(ok)（去微信输入框看是否出现文本）"
+    }
 }
 
 struct ProbeView: View {
@@ -32,6 +37,7 @@ struct ProbeView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button("运行 AX 探针") { vm.runAXProbe() }
+                Button("AX 写入输入框") { vm.insertViaAX() }
             }
             ScrollView {
                 Text(vm.output)
