@@ -60,6 +60,14 @@ enum WeChatAXProbe {
         var input: AXUIElement?
         collect(window, texts: &texts, input: &input)
 
+        // 【Phase 1 已知局限 / 待 Phase 2 解决】
+        // collect() 不加区域约束地收集窗口内全部 AXStaticText，这里再把它们一律映射为 Message
+        // 并按 midX 分左右。微信窗口的左侧会话列表项、联系人名、时间戳、"以下为新消息"等系统文本
+        // 同样是 AXStaticText，会被误当作消息混入，且其 x 位置会被错误标注 me/other（spec 5.1/8 标注的
+        // 最高风险：说话人归属准确率需实测）。Phase 1 探针只验证可行性，rawLines 输出 x 坐标供人工判读，
+        // 该污染在收尾结论里如实记录即可。Phase 2 WeChatReader 应：先定位聊天消息列表容器
+        // (AXScrollArea/AXTable 等) 再在其子树内收集 AXStaticText，排除侧栏/标题栏；说话人区分改用
+        // 气泡容器(消息行)的 frame 而非纯文本 midX，可显著降噪。
         let midX = windowFrame?.midX ?? 0
         let messages: [Message] = texts
             .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -120,13 +128,20 @@ enum WeChatAXProbe {
     static func frame(of el: AXUIElement) -> CGRect? {
         var posValue: CFTypeRef?
         var sizeValue: CFTypeRef?
+        // 仅校验 .success 不够：某些元素/微信版本可能返回 nil 或非 AXValue 包装类型，
+        // force-cast 会运行期崩溃。先校验 CFTypeID == AXValueGetTypeID() 再转换。
         guard AXUIElementCopyAttributeValue(el, "AXPosition" as CFString, &posValue) == .success,
-              AXUIElementCopyAttributeValue(el, "AXSize" as CFString, &sizeValue) == .success
+              let pv = posValue, CFGetTypeID(pv) == AXValueGetTypeID(),
+              AXUIElementCopyAttributeValue(el, "AXSize" as CFString, &sizeValue) == .success,
+              let sv = sizeValue, CFGetTypeID(sv) == AXValueGetTypeID()
         else { return nil }
+        let posV = pv as! AXValue   // 已校验类型，转换安全
+        let sizeV = sv as! AXValue
         var point = CGPoint.zero
         var size = CGSize.zero
-        AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
-        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        // AXValueGetValue 返回 false 表示取值失败（类型不匹配），此时返回 nil 而非沿用 .zero。
+        guard AXValueGetValue(posV, .cgPoint, &point),
+              AXValueGetValue(sizeV, .cgSize, &size) else { return nil }
         return CGRect(origin: point, size: size)
     }
 
