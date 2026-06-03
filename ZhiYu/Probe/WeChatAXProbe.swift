@@ -126,7 +126,7 @@ enum WeChatAXProbe {
         // d/e. 读消息：遍历消息表的行（文档顺序=时间顺序），只取最后 N 行，只读 AXValue 并解析说话人。
         var messages: [Message] = []
         if let table = messageTable {
-            messages = readMessages(from: table)
+            messages = readMessages(from: table, diagnostics: &diagnostics)
         } else {
             diagnostics.append("未定位到消息列表（结构可能已变），请用『完整结构树（诊断·慢）』诊断")
         }
@@ -266,22 +266,47 @@ enum WeChatAXProbe {
         return pickComposer(from: editables)?.element
     }
 
-    /// 读消息：遍历消息表的 AXRow/AXTableRow（文档顺序=时间顺序），每行下钻到含非空 AXValue 的叶子，
-    /// 只读 AXValue（不逐节点读 position/size），解析说话人，最后只取最后 N 行。
-    private static func readMessages(from table: AXUIElement) -> [Message] {
-        let rows = children(table).filter {
+    /// 读消息：优先按 AXRow/AXTableRow 直接行读取；若拿不到行（AppKit 表格有时把行挂在 AXColumn 下，
+    /// 或 AXChildren 不直接给行），则在表子树内按文档顺序收集叶子非空 AXValue 兜底（表子树小，开销可接受）。
+    /// 只读 AXValue，解析说话人，取最后 N 行。
+    private static func readMessages(from table: AXUIElement, diagnostics: inout [String]) -> [Message] {
+        let allChildren = children(table)
+        let rows = allChildren.filter {
             let r = role($0)
             return r == roleRow || r == roleTableRow
         }
-        var parsed: [Message] = []
+        var rawValues: [String] = []
         for row in rows {
-            guard let value = firstNonEmptyValue(in: row, depth: 0) else { continue }
-            parsed.append(parseMessage(value))
+            if let value = firstNonEmptyValue(in: row, depth: 0) { rawValues.append(value) }
         }
-        if parsed.count > maxMessages {
-            return Array(parsed.suffix(maxMessages))
+        var usedFallback = false
+        if rawValues.isEmpty {
+            usedFallback = true
+            var visited = 0
+            collectLeafValues(table, depth: 0, visited: &visited, into: &rawValues)
         }
-        return parsed
+        diagnostics.append("消息表: 子节点=\(allChildren.count) 行=\(rows.count) 取值=\(rawValues.count)\(usedFallback ? "(兜底)" : "")")
+        let parsed = rawValues.map { parseMessage($0) }
+        return parsed.count > maxMessages ? Array(parsed.suffix(maxMessages)) : parsed
+    }
+
+    /// 表子树内按文档顺序收集叶子节点的非空 AXValue（跳过 AXColumn/滚动条避免与行重复）。
+    private static func collectLeafValues(_ el: AXUIElement, depth: Int, visited: inout Int, into out: inout [String]) {
+        guard depth < 24, visited < 6000 else { return }
+        visited += 1
+        let r = role(el)
+        if r == "AXColumn" || r == "AXScrollBar" { return }
+        let kids = children(el)
+        if kids.isEmpty {
+            if let v = copyString(el, "AXValue"),
+               !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out.append(v)
+            }
+            return
+        }
+        for k in kids {
+            collectLeafValues(k, depth: depth + 1, visited: &visited, into: &out)
+        }
     }
 
     /// 行内下钻到第一个含非空 AXValue 的叶子，只读 AXValue。
