@@ -128,8 +128,10 @@ struct ProbeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
+            Divider()
+            GeneratePanel()
         }
         .padding()
-        .frame(width: 560, height: 480)
+        .frame(width: 560, height: 720)
     }
 }
