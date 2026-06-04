@@ -9,9 +9,6 @@ enum VoiceTranscriber {
     /// 并发护栏：避免两处（如 prewarm + present）同时驱动右键菜单互相打架。
     private static var isRunning = false
 
-    /// 临时性能埋点：记录最近一次 dfsMenu(_:) walk 访问的 AX 节点数，供调用方读取（定位转文字 2s 延迟）。
-    private static var lastDfsNodes = 0
-
     /// 触发"最近最多 `max` 条"未转语音的转文字，并**等到这些气泡都转写落地或 `timeout` 超时再返回**。
     /// - 取未转语音（新→旧），只取最前 `max` 条（我的 + 对方的合计）。
     /// - 逐条快速触发；触发完毕后轮询气泡文本，确认转写完成（出现「已转文字」或不再是「发送了一个语音」）。
@@ -40,29 +37,22 @@ enum VoiceTranscriber {
         // 文档顺序是 上(旧)→下(新)；reversed() 得到 新→旧，prefix(max) 取最近最多 max 条。
         let targets = Array(unconvertedVoices(in: panel).reversed().prefix(max))
         guard !targets.isEmpty else { return }
-        NSLog("[VT] 待转语音 %d 条(上限5)", targets.count)  // 临时埋点
 
         // 逐条快速触发，收集"成功点了转文字"的气泡，稍后轮询它们是否转写落地。
         var pressed: [AXUIElement] = []
-        let tFireStart = ProcessInfo.processInfo.systemUptime  // 临时埋点：触发循环起点
         for bubble in targets {
             if Task.isCancelled { break }  // ESC 已取消：停止逐条触发，不再 AXShowMenu
             if await triggerTranscribe(bubble, panel: panel, appEl: appEl) { pressed.append(bubble) }
         }
-        // 临时埋点：触发循环耗时（N=成功触发, M=目标条数）
-        NSLog("[VT] 共触发 %d/%d 条 用时 %.0fms",
-              pressed.count, targets.count, (ProcessInfo.processInfo.systemUptime - tFireStart) * 1000)
         guard !pressed.isEmpty else { return }
 
         // 转完再返回：轮询直到 pressed 里每个气泡都已转写或 timeout 到（步进 ~300ms）。
-        let tWaitStart = ProcessInfo.processInfo.systemUptime  // 临时埋点：等转写落地起点
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         while ProcessInfo.processInfo.systemUptime < deadline {
             if Task.isCancelled { return }  // ESC 已取消：停止等待转写落地
             if pressed.allSatisfy(isTranscribed) { break }
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
-        NSLog("[VT] 等转写落地 %.0fms", (ProcessInfo.processInfo.systemUptime - tWaitStart) * 1000)  // 临时埋点
         NSLog("[VoiceTranscriber] 触发转文字 %d/%d 条，等待转写落地完成", pressed.count, targets.count)
     }
 
@@ -81,12 +71,10 @@ enum VoiceTranscriber {
         guard actions(bubble).contains("AXShowMenu") else { return false }
         var target: AXUIElement?
         var foundMenu: AXUIElement?
-        var attempts = 0
         let tStart = ProcessInfo.processInfo.systemUptime
         let overallDeadline = tStart + 1.6
         while ProcessInfo.processInfo.systemUptime < overallDeadline, target == nil {
             if Task.isCancelled { return false }
-            attempts += 1
             AXUIElementSetMessagingTimeout(bubble, 0.05)
             let tShow = ProcessInfo.processInfo.systemUptime
             AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
@@ -108,9 +96,7 @@ enum VoiceTranscriber {
             if target == nil { try? await Task.sleep(nanoseconds: 80_000_000) }
         }
         if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) { target = it; foundMenu = menu }
-        let findMs = (ProcessInfo.processInfo.systemUptime - tStart) * 1000  // 临时埋点
         guard let target else {
-            NSLog("[VT] 单条: 找菜单=%.0fms 尝试=%d次 via=none", findMs, attempts)
             if let stray = dfsMenu(panel) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
                 await waitMenuClosed(stray)
@@ -118,10 +104,7 @@ enum VoiceTranscriber {
             return false
         }
         AXUIElementPerformAction(target, "AXPress" as CFString)
-        let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点
         if let m = foundMenu { await waitMenuClosed(m) }
-        let dismissMs = (ProcessInfo.processInfo.systemUptime - tPress) * 1000  // 临时埋点
-        NSLog("[VT] 单条: 找菜单=%.0fms 尝试=%d次 via=panel 关菜单=%.0fms", findMs, attempts, dismissMs)
         return true
     }
 
@@ -183,7 +166,6 @@ enum VoiceTranscriber {
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
         }
         walk(root, 0)
-        lastDfsNodes = n  // 临时埋点：记录本次 walk 访问的节点数
         return result
     }
 
