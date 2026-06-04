@@ -16,10 +16,6 @@ struct MenuBarContent: View {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "settings")
         }
-        Button("打开探针窗口") {
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "probe")
-        }
         Divider()
         Button("退出知语") { NSApplication.shared.terminate(nil) }
     }
