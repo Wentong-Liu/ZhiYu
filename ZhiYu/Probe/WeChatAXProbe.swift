@@ -426,6 +426,45 @@ enum WeChatAXProbe {
 
     static func role(_ el: AXUIElement) -> String { copyString(el, "AXRole") ?? "" }
 
+    // MARK: - 临时诊断（排查"图片/表情"消息的 AX 结构与 frame，确认后删）
+
+    /// 导出消息表最后 12 行：每个节点的 role + frame + AXValue/AXTitle/AXDescription。
+    static func dumpMessageRows() -> [String] {
+        guard AXIsProcessTrusted() else { return ["未授予辅助功能权限"] }
+        guard let app = findWeChatApp() else { return ["未找到微信"] }
+        let appEl = AXUIElementCreateApplication(app.processIdentifier)
+        _ = wakeAccessibility(appEl)
+        guard let window = copyElement(appEl, "AXFocusedWindow") ?? copyElement(appEl, "AXMainWindow") else {
+            return ["拿不到窗口"]
+        }
+        var diag: [String] = []
+        guard let panel = locateRightPanel(window: window, diagnostics: &diag) else {
+            return diag + ["没定位到右侧面板"]
+        }
+        guard let table = locateMessageTable(in: panel) else {
+            return diag + ["没定位到消息表"]
+        }
+        let rows = children(table).filter { let r = role($0); return r == roleRow || r == roleTableRow }
+        var out: [String] = ["消息行数: \(rows.count)（导出最后 12 行）"]
+        for (i, row) in Array(rows.suffix(12)).enumerated() {
+            out.append("—— row \(i) ——")
+            dumpNodeAttrs(row, depth: 0, into: &out)
+        }
+        return out
+    }
+
+    private static func dumpNodeAttrs(_ el: AXUIElement, depth: Int, into out: inout [String]) {
+        guard depth < 8 else { return }
+        let pad = String(repeating: "  ", count: depth)
+        func attr(_ a: String) -> String {
+            let s = copyString(el, a) ?? ""
+            return s.isEmpty ? "" : String(s.prefix(60)).replacingOccurrences(of: "\n", with: "⏎")
+        }
+        let f = frame(of: el).map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height)))" } ?? "-"
+        out.append("\(pad)\(role(el)) \(f) | V=「\(attr("AXValue"))」 T=「\(attr("AXTitle"))」 D=「\(attr("AXDescription"))」")
+        for c in children(el) { dumpNodeAttrs(c, depth: depth + 1, into: &out) }
+    }
+
     static func frame(of el: AXUIElement) -> CGRect? {
         var posValue: CFTypeRef?
         var sizeValue: CFTypeRef?
