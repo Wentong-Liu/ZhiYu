@@ -23,8 +23,11 @@ public struct CodexResponsesProvider: LLMProvider {
         let system = messages.first(where: { $0.role == .system })?.content ?? "You are a helpful assistant."
         let input: [[String: Any]] = messages.filter { $0.role != .system }.map { m in
             let type = (m.role == .assistant) ? "output_text" : "input_text"
-            return ["role": m.role.rawValue,
-                    "content": [["type": type, "text": m.content]]]
+            var content: [[String: Any]] = [["type": type, "text": m.content]]
+            for url in m.imageDataURLs {
+                content.append(["type": "input_image", "image_url": url])
+            }
+            return ["role": m.role.rawValue, "content": content]
         }
         let body: [String: Any] = [
             "model": model,
@@ -49,7 +52,7 @@ public struct CodexResponsesProvider: LLMProvider {
         req.setValue("responses=experimental", forHTTPHeaderField: "OpenAI-Beta")
         req.setValue("text/event-stream", forHTTPHeaderField: "accept")
         req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.withoutEscapingSlashes])
 
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)
         do {

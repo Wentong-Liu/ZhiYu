@@ -15,9 +15,11 @@ public struct OpenAICompatibleProvider: LLMProvider {
         self.extraHeaders = extraHeaders
     }
 
+    /// 发给 chat/completions 的线上消息，仅含 role+content（不带图片字段）。
+    private struct WireMessage: Encodable { let role: String; let content: String }
     private struct RequestBody: Encodable {
         let model: String
-        let messages: [LLMMessage]
+        let messages: [WireMessage]
         let temperature: Double
     }
     private struct ResponseBody: Decodable {
@@ -35,8 +37,9 @@ public struct OpenAICompatibleProvider: LLMProvider {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        let wire = messages.map { WireMessage(role: $0.role.rawValue, content: $0.content) }
         req.httpBody = try JSONEncoder().encode(
-            RequestBody(model: config.model, messages: messages, temperature: 0.8))
+            RequestBody(model: config.model, messages: wire, temperature: 0.8))
 
         let data: Data
         let response: URLResponse

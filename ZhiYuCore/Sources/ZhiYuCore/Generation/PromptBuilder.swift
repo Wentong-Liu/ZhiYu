@@ -29,9 +29,11 @@ public enum PromptBuilder {
         if !context.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             convo += "\n我已经打了草稿：「\(context.draft)」。请在此基础上续写/润色，生成候选。\n"
         }
+        let hasImages = !context.imageDataURLs.isEmpty
+        let convoText = convo + (hasImages ? "\n（对方还发了图片/表情，见附带的图像，请结合图像内容回复。）\n" : "")
         return [
             LLMMessage(role: .system, content: system),
-            LLMMessage(role: .user, content: convo),
+            LLMMessage(role: .user, content: convoText, imageDataURLs: context.imageDataURLs),
         ]
     }
 }
