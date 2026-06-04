@@ -23,6 +23,8 @@ final class CandidatePanelController: NSObject {
     private var lastCheapSignature: String?
     /// 一次 present 的 Task 是否在飞：转文字会改动微信 AX→触发 watcher，须在此期间抑制自动评估的 re-entry，避免重复弹。
     private var isBusy = false
+    /// present 代际令牌：新 present 取代在飞旧 present 时自增，旧 Task 完成时凭此识别自己已陈旧、不再写回。
+    private var presentGeneration = 0
 
     /// 双击触发：读当前会话快照并展示。
     func trigger() {
@@ -36,6 +38,8 @@ final class CandidatePanelController: NSObject {
         guard !snapshot.context.messages.isEmpty, let frame = snapshot.composerFrame else { NSSound.beep(); return }
         dismiss()  // 重复展示前先收掉残留面板/监听，避免层叠
         isBusy = true
+        presentGeneration += 1
+        let generation = presentGeneration
         var baseContext = snapshot.context
         var imageFrames = snapshot.imageFrames
         // 先复位到加载态再建面板：面板按"加载态"测高，内容到位后再 relayout，避免沿用上次内容的尺寸。
@@ -52,14 +56,16 @@ final class CandidatePanelController: NSObject {
             do {
                 // 若会话里有"未转文字"的语音 → 快速逐条触发转文字（新→旧、不等结果），转写回来后重读。
                 if baseContext.messages.contains(where: { $0.text.contains("[语音]") }) {
-                    self.model.loadingNote = "转写语音中…"
+                    if generation == self.presentGeneration { self.model.loadingNote = "转写语音中…" }
                     await VoiceTranscriber.transcribeLoaded()
                     if let fresh = WeChatReader.readSnapshot() {
                         baseContext = fresh.context
                         imageFrames = fresh.imageFrames
-                        self.lastSeenSig[baseContext.contactName] = MessageSignal.signature(baseContext)
+                        if generation == self.presentGeneration {
+                            self.lastSeenSig[baseContext.contactName] = MessageSignal.signature(baseContext)
+                        }
                     }
-                    self.model.loadingNote = "生成中…"
+                    if generation == self.presentGeneration { self.model.loadingNote = "生成中…" }
                 }
                 // 异步截取图片/表情气泡，附到上下文后再生成。无图时 urls 为空、上下文仅文本。
                 let urls = await WeChatReader.captureImages(imageFrames)
@@ -67,6 +73,7 @@ final class CandidatePanelController: NSObject {
                 let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
+                guard generation == self.presentGeneration else { return }  // 陈旧任务：新 present 已接管，不写、不动 isBusy
                 self.model.candidates = result.candidates
                 self.model.stickerKeyword = result.stickerKeyword
                 self.model.isLoading = false
@@ -74,6 +81,7 @@ final class CandidatePanelController: NSObject {
                 self.relayout()  // 内容到位后按真实高度重新布局
                 self.isBusy = false
             } catch {
+                guard generation == self.presentGeneration else { return }  // 陈旧任务：新 present 已接管，不写、不动 isBusy
                 self.model.isLoading = false
                 self.model.status = "失败：\(error)"
                 self.relayout()

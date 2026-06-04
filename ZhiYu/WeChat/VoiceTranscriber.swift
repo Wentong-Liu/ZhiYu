@@ -51,16 +51,37 @@ enum VoiceTranscriber {
         while ProcessInfo.processInfo.systemUptime - start < 0.8 {
             if let menu = findFirstRole("AXMenu", in: appEl) {
                 if let it = transcribeItem(in: menu) { target = it; break }
-                // 菜单已出但没有「转文字」（自己发的/不支持）→ 关掉跳过。
+                // 菜单已出但没有「转文字」（自己发的/不支持）→ 关掉，等它真正消失再跳过，
+                // 避免遗留菜单被下一条 AXShowMenu 命中（findFirstRole 找的是全 app 第一个菜单）。
                 AXUIElementPerformAction(menu, "AXCancel" as CFString)
+                await waitMenuDismissed(appEl: appEl)
                 return false
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
-        guard let target else { return false }
+        guard let target else {
+            // 0.8s 内菜单始终没出现：兜底关掉任何此刻遗留的游离菜单，再返回。
+            if let stray = findFirstRole("AXMenu", in: appEl) {
+                AXUIElementPerformAction(stray, "AXCancel" as CFString)
+                await waitMenuDismissed(appEl: appEl)
+            }
+            return false
+        }
         AXUIElementPerformAction(target, "AXPress" as CFString)  // 选中即关菜单并开始转写（服务器异步转，不等结果）
-        try? await Task.sleep(nanoseconds: 60_000_000)           // 仅让菜单收起、给下一条让位，尽量快地点过去
+        // 只等「菜单关闭」（几十毫秒级），不等服务器转写返回；确认菜单消失再放行下一条，
+        // 防止下一条 AXShowMenu 时命中上一条还没收起的旧菜单造成漏转/转错。
+        await waitMenuDismissed(appEl: appEl)
         return true
+    }
+
+    /// 轮询直到全 app 内已无 AXMenu（菜单收起）或 ~0.5s 超时；小步轮询约 40ms/步。
+    /// 我们只等菜单关闭，不等转写结果，整体仍是「快速点过去」的策略。
+    private static func waitMenuDismissed(appEl: AXUIElement) async {
+        let start = ProcessInfo.processInfo.systemUptime
+        while ProcessInfo.processInfo.systemUptime - start < 0.5 {
+            if findFirstRole("AXMenu", in: appEl) == nil { return }
+            try? await Task.sleep(nanoseconds: 40_000_000)
+        }
     }
 
     /// 菜单里标题 trim 后等于「转文字」且 enabled 的菜单项。
