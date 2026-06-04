@@ -14,22 +14,23 @@ enum StickerSender {
 
     @discardableResult
     static func run(keyword: String) async -> Bool {
-        guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { fail(); return false }
+        guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { fail("无辅助功能权限或未找到微信"); return false }
         app.activate(options: [])
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
         WeChatAXProbe.wakeAccessibility(appEl)
 
         // 1) 打开表情面板：AXPress 主窗口右侧「表情」按钮。
         guard let window = WeChatAXProbe.copyElement(appEl, "AXFocusedWindow")
-                ?? WeChatAXProbe.copyElement(appEl, "AXMainWindow") else { fail(); return false }
+                ?? WeChatAXProbe.copyElement(appEl, "AXMainWindow") else { fail("拿不到微信窗口"); return false }
         let panelRoot = WeChatAXProbe.rightPanelRoot(window: window)
-        guard let emojiBtn = findButton(in: panelRoot, title: "表情") else { fail(); return false }
+        guard let emojiBtn = findButton(in: panelRoot, title: "表情") else { fail("未找到「表情」按钮"); return false }
         AXUIElementPerformAction(emojiBtn, "AXPress" as CFString)
 
-        // 2) 等 popover。
-        guard let popover = await poll(timeout: 1.6, { findRole("AXPopover", in: appEl) }) else { fail(); return false }
+        // 2) 等 popover（只在 app 顶层浅查，避免 DFS 扎进左侧巨表导致误返回 nil）。
+        guard let popover = await poll(timeout: 1.6, { findPopoverShallow(appEl) ?? findRole("AXPopover", in: appEl) })
+        else { fail("表情面板(popover)未出现"); return false }
 
-        // 3) 进搜索：优先 AXPress 底部工具栏第一个 item；不行则坐标点击其中心。
+        // 3) 进搜索：优先 AXPress 底部工具栏第一个 item(🔍)；不行则坐标点击其中心。
         if (await poll(timeout: 0.6, { searchField(in: popover) })) == nil {
             if let first = bottomToolbarFirstItem(in: popover) {
                 AXUIElementPerformAction(first, "AXPress" as CFString)
@@ -37,19 +38,24 @@ enum StickerSender {
                    let f = WeChatAXProbe.frame(of: first) {
                     clickAt(CGPoint(x: f.midX, y: f.midY))
                 }
+            } else {
+                NSLog("[StickerSender] 警告：未定位到底部工具栏🔍项")
             }
         }
-        guard let field = await poll(timeout: 1.6, { searchField(in: popover) }) else { fail(); return false }
+        guard let field = await poll(timeout: 1.6, { searchField(in: popover) }) else { fail("未进入表情搜索框"); return false }
 
         // 4) 写关键词 + 回车。
         AXUIElementSetAttributeValue(field, "AXValue" as CFString, keyword as CFString)
         AXUIElementPerformAction(field, "AXConfirm" as CFString)
 
-        // 5) 轮询结果（有 Press 且 ≥60×60，排除 Tab/搜索中），取最靠左上的第一个，AXPress。
-        guard let cell = await poll(timeout: 3.5, { firstResultCell(in: popover) }) else { fail(); return false }
-        try? await Task.sleep(nanoseconds: 200_000_000)  // 让排序稳定一下
-        let target = firstResultCell(in: popover) ?? cell
+        // 5) 轮询结果（有 Press 且 ≥60×60，排除 Tab/搜索中），稳定后重定位取最靠左上的第一个，AXPress。
+        guard await poll(timeout: 3.5, { firstResultCell(in: popover) }) != nil
+        else { fail("未搜到「\(keyword)」的表情结果"); return false }
+        try? await Task.sleep(nanoseconds: 250_000_000)  // 让结果网格排序稳定
+        // 不复用首次句柄（结果可能整体重建而失效），稳定后重新定位。
+        guard let target = await poll(timeout: 0.6, { firstResultCell(in: popover) }) else { fail("结果重定位失败"); return false }
         AXUIElementPerformAction(target, "AXPress" as CFString)
+        NSLog("[StickerSender] 已 AXPress 第一个结果，关键词=%@", keyword)
         return true
     }
 
@@ -62,13 +68,18 @@ enum StickerSender {
         }
     }
 
-    /// 底部工具栏（height≈48 的 AXScrollArea）里的第一个有 frame 的 AXGroup（= 🔍）。
+    /// 底部工具栏(🔍/😀/❤️/表情包 那条)的第一个图标项(= 🔍)。
+    /// 特征：矮(height≤80) 且 横向铺满(宽度≥popover 宽度一半，排除窄 Tab 条)；取**最靠底**的那条。
     private static func bottomToolbarFirstItem(in popover: AXUIElement) -> AXUIElement? {
+        let popW = WeChatAXProbe.frame(of: popover)?.width ?? 0
         var scrolls: [AXUIElement] = []
         collectRole("AXScrollArea", in: popover, into: &scrolls)
         let toolbar = scrolls
-            .filter { (WeChatAXProbe.frame(of: $0)?.height ?? 999) <= 80 }
-            .min(by: { (WeChatAXProbe.frame(of: $0)?.height ?? 999) < (WeChatAXProbe.frame(of: $1)?.height ?? 999) })
+            .filter {
+                guard let f = WeChatAXProbe.frame(of: $0) else { return false }
+                return f.height <= 80 && (popW <= 0 || f.width >= popW * 0.5)
+            }
+            .max(by: { (WeChatAXProbe.frame(of: $0)?.minY ?? -1) < (WeChatAXProbe.frame(of: $1)?.minY ?? -1) })
         guard let toolbar else { return nil }
         var groups: [AXUIElement] = []
         collectRole("AXGroup", in: toolbar, into: &groups)
@@ -100,6 +111,18 @@ enum StickerSender {
     }
     private static func findRole(_ role: String, in root: AXUIElement) -> AXUIElement? {
         findFirst(in: root) { WeChatAXProbe.role($0) == role }
+    }
+    /// 只在 app 顶层浅查 AXPopover（深度≤3），避免 DFS 深入左侧聊天巨表（项目已知性能痛点）。
+    /// popover 通常是 app 的顶层子节点；这层只触及个位数节点，触不到表格行。
+    private static func findPopoverShallow(_ appEl: AXUIElement) -> AXUIElement? {
+        func scan(_ el: AXUIElement, _ d: Int) -> AXUIElement? {
+            if WeChatAXProbe.role(el) == "AXPopover" { return el }
+            guard d < 3 else { return nil }
+            for c in WeChatAXProbe.children(el) { if let hit = scan(c, d + 1) { return hit } }
+            return nil
+        }
+        for c in WeChatAXProbe.children(appEl) { if let hit = scan(c, 1) { return hit } }
+        return nil
     }
     private static func findFirst(in root: AXUIElement, _ match: (AXUIElement) -> Bool) -> AXUIElement? {
         var result: AXUIElement?; var n = 0
@@ -151,5 +174,9 @@ enum StickerSender {
         CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
 
-    private static func fail() { NSSound.beep() }
+    /// 失败：记一条带阶段的日志（便于联调定位是哪一步挂了）+ 一声 beep。不会乱发。
+    private static func fail(_ stage: String) {
+        NSLog("[StickerSender] 失败：%@", stage)
+        NSSound.beep()
+    }
 }
