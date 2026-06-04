@@ -4,13 +4,33 @@ import Foundation
 public enum CandidateParser {
     public static func parse(_ raw: String, max: Int) -> [String] {
         var items = parseJSONArray(raw) ?? parseLines(raw)
-        // trim + 去空 + 去重（保序）
+        // trim + 去空 + 去表情行 + 去重（保序）
         var seen = Set<String>()
         items = items
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+            .filter { $0.range(of: stickerLinePattern, options: .regularExpression) == nil }
             .filter { seen.insert($0).inserted }
         return Array(items.prefix(max))
+    }
+
+    /// 匹配独立的"表情: 关键词"行的正则（半/全角冒号）。
+    private static let stickerLinePattern = "^\\s*表情\\s*[:：]"
+
+    /// 解析可选的"表情关键词"：匹配独立的一行 `表情: 关键词` / `表情：关键词`（半/全角冒号）。
+    /// 去掉引号/方括号/书名号；"无"/"none"/"没有"视为不建议表情，返回 nil。
+    public static func parseSticker(_ raw: String) -> String? {
+        guard let r = raw.range(of: "(?m)^\\s*表情\\s*[:：]\\s*(.+)$", options: .regularExpression) else {
+            return nil
+        }
+        var s = String(raw[r])
+        if let colon = s.range(of: "[:：]", options: .regularExpression) {
+            s = String(s[colon.upperBound...])
+        }
+        s = s.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"'「」『』【】[]()（）"))
+        let lowered = s.lowercased()
+        if s.isEmpty || ["无", "没有", "none", "n/a", "不需要"].contains(lowered) { return nil }
+        return s
     }
 
     /// 截取第一个 [ ... ] 区间按 JSON 字符串数组解析。

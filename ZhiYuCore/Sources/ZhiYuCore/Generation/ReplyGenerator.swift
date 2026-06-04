@@ -16,17 +16,21 @@ public struct ReplyGenerator: Sendable {
         self.modelTag = modelTag
     }
 
-    public func generate(context: ChatContext, style: ReplyStyle) async throws -> [String] {
+    public func generate(context: ChatContext, style: ReplyStyle) async throws -> ReplyResult {
         let key = ContextHasher.key(for: context)
             + "|style:" + style.name
             + "|n:\(candidateCount)"
             + "|instr:" + style.instruction
             + "|model:" + modelTag
-        if let cached = cache.candidates(forKey: key) { return cached }
+        if let cached = cache.candidates(forKey: key) {
+            return ReplyResult(candidates: cached, stickerKeyword: cache.stickerKeyword(forKey: key))
+        }
         let messages = PromptBuilder.build(context: context, style: style, candidateCount: candidateCount)
         let raw = try await provider.complete(messages: messages)
         let candidates = CandidateParser.parse(raw, max: candidateCount)
+        let sticker = CandidateParser.parseSticker(raw)
         cache.store(candidates, forKey: key)
-        return candidates
+        cache.storeSticker(sticker, forKey: key)
+        return ReplyResult(candidates: candidates, stickerKeyword: sticker)
     }
 }

@@ -4,6 +4,7 @@ import Foundation
 /// 仅存内存，App 退出即清（符合 spec 隐私要求：不持久化聊天内容）。
 public final class CandidateCache: @unchecked Sendable {
     private var storage: [String: [String]] = [:]
+    private var stickerStorage: [String: String] = [:]
     private let lock = NSLock()
 
     public init() {}
@@ -18,8 +19,19 @@ public final class CandidateCache: @unchecked Sendable {
         storage[key] = candidates
     }
 
+    public func stickerKeyword(forKey key: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return stickerStorage[key]
+    }
+
+    public func storeSticker(_ keyword: String?, forKey key: String) {
+        lock.lock(); defer { lock.unlock() }
+        if let k = keyword, !k.isEmpty { stickerStorage[key] = k } else { stickerStorage[key] = nil }
+    }
+
     public func clear() {
         lock.lock(); defer { lock.unlock() }
         storage.removeAll()
+        stickerStorage.removeAll()
     }
 }

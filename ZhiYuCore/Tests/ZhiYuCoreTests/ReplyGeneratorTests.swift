@@ -22,7 +22,7 @@ private func ctx() -> ChatContext {
     let provider = CountingProvider(canned: "[\"在\",\"在的\",\"怎么了\"]")
     let gen = ReplyGenerator(provider: provider, cache: CandidateCache(), candidateCount: 3)
     let result = try await gen.generate(context: ctx(), style: .concise)
-    #expect(result == ["在", "在的", "怎么了"])
+    #expect(result.candidates == ["在", "在的", "怎么了"])
     #expect(provider.calls == 1)
 }
 
