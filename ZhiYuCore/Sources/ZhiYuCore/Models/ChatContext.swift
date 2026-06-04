@@ -8,10 +8,14 @@ public struct ChatContext: Codable, Equatable, Sendable {
     public let messages: [ChatMessage]
     /// 输入框中已有的草稿（可能为空）。
     public let draft: String
+    /// 最近图片/表情的截图（base64 data URL），供视觉模型识别；无则空。
+    public let imageDataURLs: [String]
 
-    public init(contactName: String, messages: [ChatMessage], draft: String) {
+    public init(contactName: String, messages: [ChatMessage], draft: String,
+                imageDataURLs: [String] = []) {
         self.contactName = contactName
         self.messages = messages
         self.draft = draft
+        self.imageDataURLs = imageDataURLs
     }
 }

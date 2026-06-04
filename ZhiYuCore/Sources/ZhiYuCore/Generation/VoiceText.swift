@@ -19,6 +19,12 @@ public enum VoiceText {
         if text.contains("发送了一个语音") {
             return "[语音]"
         }
+        if text.contains("发送了一个图片") {
+            return "[图片]"
+        }
+        if text.contains("发送了一个表情") {
+            return "[表情]"
+        }
         return text
     }
 }
