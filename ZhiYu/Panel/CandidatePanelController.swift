@@ -70,7 +70,10 @@ final class CandidatePanelController: NSObject {
     func autoOnActivate() {
         guard AppConfig.shared.autoOnNewMessage else { return }
         guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
-              MessageSignal.lastIsIncoming(snap.context) else { return }
+              MessageSignal.lastIsIncoming(snap.context),
+              snap.composerFrame != nil else { return }   // 激活瞬间 AX 过渡态读不到输入框：静默放弃（不 beep）
+        // 我已经在打草稿（正自己回）：别抢面板。想要候选可手动双击右⌘。
+        guard snap.context.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
         present(snapshot: snap)
     }
@@ -87,7 +90,9 @@ final class CandidatePanelController: NSObject {
         guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
               MessageSignal.lastIsIncoming(snap.context) else { return }
         guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
-        if isWeChatFrontmost() {
+        // 我正在打草稿就别抢面板；前台且没在打字、且能拿到输入框 frame 才弹，否则仅预暖。
+        let typing = !snap.context.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isWeChatFrontmost() && !typing && snap.composerFrame != nil {
             present(snapshot: snap)
         } else if snap.imageFrames.isEmpty {
             prewarm(snapshot: snap)
@@ -98,7 +103,6 @@ final class CandidatePanelController: NSObject {
     private func prewarm(snapshot: WeChatReader.Snapshot) {
         let sig = MessageSignal.signature(snapshot.context)
         guard sig != lastPrewarmSignature else { return }
-        lastPrewarmSignature = sig
         let base = snapshot.context
         let style = AppConfig.shared.currentStyle()
         Task {
@@ -106,6 +110,7 @@ final class CandidatePanelController: NSObject {
                 let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 _ = try await gen.generate(context: base, style: style)
+                self.lastPrewarmSignature = sig   // 成功后才记指纹；失败留待同状态下次 AX 事件重试预暖
             } catch { }
         }
     }
