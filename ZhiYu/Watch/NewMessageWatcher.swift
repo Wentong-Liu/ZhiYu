@@ -1,8 +1,9 @@
 import AppKit
 import ApplicationServices
+import ZhiYuCore
 
 /// 监听微信新消息（AXObserver，事件驱动非轮询）+ 微信激活（NSWorkspace）。
-/// 新消息→防抖→交给 CandidatePanelController 决定预生成/展示；微信激活→展示当前会话的新消息候选（兜底，必然可用）。
+/// 新消息→防抖+硬节流→交给 CandidatePanelController 决定预生成/展示；微信激活→展示当前会话的新消息候选（兜底，必然可用）。
 @MainActor
 final class NewMessageWatcher {
     static let shared = NewMessageWatcher()
@@ -10,6 +11,14 @@ final class NewMessageWatcher {
     private var observedPID: pid_t = 0
     private var debounce: DispatchWorkItem?
     private var activationToken: NSObjectProtocol?
+
+    /// 抖动合并窗口：把一串通知合并成一次评估。
+    private static let debounceWindow: TimeInterval = 0.4
+    /// 两次实际读取的最小间隔：前台高频通知下，每个安静窗口都跑一整次 ~200ms 同步快读会周期性卡顿；
+    /// 这里在昂贵读取之前加硬节流，把读取频率压到 ≥ 此间隔一次。
+    private static let minReadInterval: TimeInterval = 1.2
+    /// 上次实际触发 autoOnDetect（昂贵快读）的单调时间。
+    private var lastDetectAt: TimeInterval?
 
     func start() {
         if activationToken == nil {
@@ -63,13 +72,22 @@ final class NewMessageWatcher {
         observedPID = 0
     }
 
-    /// AX 通知回调（已在主线程）：开关关则忽略；否则防抖 0.4s 后交给控制器评估。
+    /// AX 通知回调（已在主线程）：开关关则忽略；否则防抖+硬节流后交给控制器评估。
+    /// 防抖把一串通知合并；硬节流保证两次实际昂贵快读至少间隔 `minReadInterval`，
+    /// 避免前台高频通知下每个 0.4s 安静窗口都付出一整次 ~200ms 主线程同步读取。
     fileprivate func onAXNotification() {
         guard AppConfig.shared.autoOnNewMessage else { return }
         debounce?.cancel()
-        let work = DispatchWorkItem { CandidatePanelController.shared.autoOnDetect() }
+        let now = ProcessInfo.processInfo.systemUptime
+        let delay = DetectThrottle.delay(now: now, lastRunAt: lastDetectAt,
+                                         debounce: Self.debounceWindow,
+                                         minInterval: Self.minReadInterval)
+        let work = DispatchWorkItem { [weak self] in
+            self?.lastDetectAt = ProcessInfo.processInfo.systemUptime
+            CandidatePanelController.shared.autoOnDetect()
+        }
         debounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }
 

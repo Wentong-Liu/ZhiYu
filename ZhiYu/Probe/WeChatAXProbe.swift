@@ -163,6 +163,32 @@ enum WeChatAXProbe {
             diagnostics: diagnostics))
     }
 
+    // MARK: - 廉价指纹（高频去重前移，避免每次都跑完整 run()）
+
+    /// 极廉价的会话指纹：只导航到消息表，读"行数 + 最后一行首个非空文本"，
+    /// 不解析全部行、不读 frame、不读 composer、不截图。供前台高频 AX 通知在
+    /// 昂贵的 run() 之前做去重——指纹不变直接 return，把去重前移到昂贵读取之前。
+    /// 读不到（结构未就绪/无权限/无窗口）返回 nil，调用方据此回退到完整 run()。
+    static func cheapSignature() -> String? {
+        guard AXIsProcessTrusted(), let app = findWeChatApp() else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        guard let window = copyElement(appElement, "AXFocusedWindow")
+                ?? copyElement(appElement, "AXMainWindow") else { return nil }
+        var diag: [String] = []
+        guard let panel = locateRightPanel(window: window, diagnostics: &diag),
+              let table = locateMessageTable(in: panel) else { return nil }
+        let rows = children(table).filter {
+            let r = role($0)
+            return r == roleRow || r == roleTableRow
+        }
+        guard let lastRow = rows.last else {
+            // 拿不到行（个别版本把行挂在 AXColumn 下）：仅用子节点数粗指纹，仍能反映新增。
+            return "n\(children(table).count)"
+        }
+        let lastText = firstNonEmptyValue(in: lastRow, depth: 0) ?? ""
+        return "\(rows.count)|\(lastText)"
+    }
+
     /// 定位右侧会话面板：
     /// 1) 在窗口浅层子节点里找 role==AXSplitGroup 的主 split group。
     /// 2) 在主 split group 的【直接子节点】里找 role==AXSplitGroup 的那个作为右侧面板。

@@ -19,6 +19,8 @@ final class CandidatePanelController: NSObject {
     private var lastAutoSignature: String?
     /// 已后台预暖过的会话指纹（预暖去重）。
     private var lastPrewarmSignature: String?
+    /// 上次廉价指纹（高频去重前移：相同则不跑昂贵的完整快读）。
+    private var lastCheapSignature: String?
 
     /// 双击触发：读当前会话快照并展示。
     func trigger() {
@@ -73,9 +75,15 @@ final class CandidatePanelController: NSObject {
         present(snapshot: snap)
     }
 
-    /// AX 事件（防抖后）：有新消息→前台则直接展示，后台则仅预生成暖缓存（图片消息后台不预暖）。
+    /// AX 事件（防抖+硬节流后）：有新消息→前台则直接展示，后台则仅预生成暖缓存（图片消息后台不预暖）。
+    /// 先做极廉价的预判（只读消息表行数+最后一行文本），与上次廉价指纹比对，相同就直接 return，
+    /// 不跑昂贵的完整快读 readSnapshot()——把去重前移到昂贵读取之前，真正抑制前台狂刷的卡顿。
     func autoOnDetect() {
         guard AppConfig.shared.autoOnNewMessage else { return }
+        if let cheap = WeChatAXProbe.cheapSignature() {
+            guard cheap != lastCheapSignature else { return }
+            lastCheapSignature = cheap
+        }
         guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
               MessageSignal.lastIsIncoming(snap.context) else { return }
         guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
