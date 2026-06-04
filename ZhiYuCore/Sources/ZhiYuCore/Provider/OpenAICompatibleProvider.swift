@@ -5,11 +5,14 @@ public struct OpenAICompatibleProvider: LLMProvider {
     private let config: ProviderConfig
     private let apiKey: String
     private let session: URLSession
+    private let extraHeaders: [String: String]
 
-    public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared) {
+    public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared,
+                extraHeaders: [String: String] = [:]) {
         self.config = config
         self.apiKey = apiKey
         self.session = session
+        self.extraHeaders = extraHeaders
     }
 
     private struct RequestBody: Encodable {
@@ -31,6 +34,7 @@ public struct OpenAICompatibleProvider: LLMProvider {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
         req.httpBody = try JSONEncoder().encode(
             RequestBody(model: config.model, messages: messages, temperature: 0.8))
 

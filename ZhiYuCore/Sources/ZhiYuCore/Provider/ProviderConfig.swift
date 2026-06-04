@@ -13,4 +13,7 @@ public struct ProviderConfig: Equatable, Sendable {
     public static func openAI(model: String) -> ProviderConfig {
         ProviderConfig(name: "OpenAI", baseURL: "https://api.openai.com/v1", model: model)
     }
+    public static func deepSeek(model: String) -> ProviderConfig {
+        ProviderConfig(name: "DeepSeek", baseURL: "https://api.deepseek.com", model: model)
+    }
 }
