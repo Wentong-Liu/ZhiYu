@@ -7,25 +7,33 @@ import ZhiYuCore
 final class CodexLoginService {
     static let shared = CodexLoginService()
 
+    /// 登录超时（秒）：用户打开浏览器后若一直不完成授权，到点自动收尾，释放端口 1455。
+    private static let loginTimeout: TimeInterval = 300
+
     private var listener: NWListener?
     private var pkce: PKCE?
     private var state: String = ""
     private var completion: ((Result<OAuthTokens, Error>) -> Void)?
+    private var timeoutTask: Task<Void, Never>?
 
     enum LoginError: Error, CustomStringConvertible {
-        case serverFailed, stateMismatch, noCode, exchangeFailed(String)
+        case serverFailed, stateMismatch, noCode, exchangeFailed(String), cancelled, timedOut
         var description: String {
             switch self {
             case .serverFailed: return "本地回环服务启动失败（端口 1455 可能被占用）"
             case .stateMismatch: return "state 校验失败"
             case .noCode: return "回调里没有授权码"
             case .exchangeFailed(let m): return "换 token 失败：\(m)"
+            case .cancelled: return "登录已取消"
+            case .timedOut: return "登录超时，请重试"
             }
         }
     }
 
     /// 启动登录流程：起服务 → 开浏览器 → 等回调 → 换 token。
+    /// 重入保护：若已有进行中的登录，先收尾旧流程（cancel listener + 旧 completion 报 cancelled），保证同一时刻只有一个会话。
     func login(completion: @escaping (Result<OAuthTokens, Error>) -> Void) {
+        finish(.failure(LoginError.cancelled))  // 清理上一轮（若有）：cancel 旧 listener、触发旧 completion、停掉旧超时
         self.completion = completion
         let pkce = PKCE.generate()
         self.pkce = pkce
@@ -47,6 +55,16 @@ final class CodexLoginService {
             self.listener = l
         } catch {
             finish(.failure(LoginError.serverFailed)); return
+        }
+
+        // 超时收尾：到点若仍在 listening（用户未完成授权），自动 finish 释放端口、触发 completion。
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.loginTimeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.listener != nil else { return }
+                self.finish(.failure(LoginError.timedOut))
+            }
         }
 
         NSWorkspace.shared.open(ChatGPTOAuth.authorizeURL(pkce: pkce, state: state))
@@ -93,9 +111,11 @@ final class CodexLoginService {
     }
 
     private func finish(_ result: Result<OAuthTokens, Error>) {
+        timeoutTask?.cancel(); timeoutTask = nil
         listener?.cancel(); listener = nil
+        pkce = nil; state = ""
         let c = completion; completion = nil
-        c?(result)
+        c?(result)  // completion 为 nil 时（无进行中会话）整体为安全 no-op
     }
 
     /// 取有效 access token（过期则用 refresh_token 刷新并回存）。
