@@ -86,7 +86,7 @@ enum VoiceTranscriber {
         await waitMenuDismissed(panel: panel)
         // 临时埋点：单独测 AXShowMenu 调用本身耗时（怀疑此调用阻塞 ~1.5s）。
         let tA = ProcessInfo.processInfo.systemUptime
-        AXUIElementSetMessagingTimeout(bubble, 0.5)  // 该 AX 调用最多等 0.5s 就返回；菜单已弹出，无需傻等 ~1.5s
+        AXUIElementSetMessagingTimeout(bubble, 0.05)  // 该 AX 调用最多等 50ms 就返回；菜单已弹出，无需傻等 ~1.5s
         AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
         let showMs = (ProcessInfo.processInfo.systemUptime - tA) * 1000
 
