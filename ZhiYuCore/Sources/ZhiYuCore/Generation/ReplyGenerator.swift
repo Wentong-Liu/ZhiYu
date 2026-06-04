@@ -1,20 +1,27 @@
 import Foundation
 
 /// 编排一次候选生成：去重缓存命中则复用，否则组 prompt→调模型→解析→存缓存。
+/// 缓存 key 纳入 modelTag（Provider+模型），切换模型不会误命中旧缓存。
 public struct ReplyGenerator: Sendable {
     private let provider: any LLMProvider
     private let cache: CandidateCache
     private let candidateCount: Int
+    private let modelTag: String
 
-    public init(provider: any LLMProvider, cache: CandidateCache, candidateCount: Int = 3) {
+    public init(provider: any LLMProvider, cache: CandidateCache,
+                candidateCount: Int = 3, modelTag: String = "") {
         self.provider = provider
         self.cache = cache
         self.candidateCount = candidateCount
+        self.modelTag = modelTag
     }
 
     public func generate(context: ChatContext, style: ReplyStyle) async throws -> [String] {
-        let key = ContextHasher.key(for: context) + "|style:" + style.name
-            + "|n:\(candidateCount)|instr:" + style.instruction
+        let key = ContextHasher.key(for: context)
+            + "|style:" + style.name
+            + "|n:\(candidateCount)"
+            + "|instr:" + style.instruction
+            + "|model:" + modelTag
         if let cached = cache.candidates(forKey: key) { return cached }
         let messages = PromptBuilder.build(context: context, style: style, candidateCount: candidateCount)
         let raw = try await provider.complete(messages: messages)
