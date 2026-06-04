@@ -1,0 +1,89 @@
+import Foundation
+
+/// ChatGPT(Codex) OAuth：构造授权 URL、换/刷 token 请求、解析 token、从 JWT 取 account_id。
+/// 协议常量来自 openai/codex 与 OpenClaw 源码（originator=openclaw）。
+public enum ChatGPTOAuth {
+    public static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+    public static let authorizeEndpoint = "https://auth.openai.com/oauth/authorize"
+    public static let tokenEndpoint = "https://auth.openai.com/oauth/token"
+    public static let redirectURI = "http://localhost:1455/auth/callback"
+    public static let scope = "openid profile email offline_access"
+    public static let originator = "openclaw"
+
+    public static func authorizeURL(pkce: PKCE, state: String) -> URL {
+        var c = URLComponents(string: authorizeEndpoint)!
+        c.queryItems = [
+            .init(name: "response_type", value: "code"),
+            .init(name: "client_id", value: clientID),
+            .init(name: "redirect_uri", value: redirectURI),
+            .init(name: "scope", value: scope),
+            .init(name: "code_challenge", value: pkce.challenge),
+            .init(name: "code_challenge_method", value: "S256"),
+            .init(name: "id_token_add_organizations", value: "true"),
+            .init(name: "codex_cli_simplified_flow", value: "true"),
+            .init(name: "state", value: state),
+            .init(name: "originator", value: originator),
+        ]
+        return c.url!
+    }
+
+    public static func tokenExchangeRequest(code: String, verifier: String) -> URLRequest {
+        formPost(body: "grant_type=authorization_code&code=\(enc(code))"
+            + "&redirect_uri=\(enc(redirectURI))&client_id=\(enc(clientID))&code_verifier=\(enc(verifier))")
+    }
+
+    public static func refreshRequest(refreshToken: String) -> URLRequest {
+        formPost(body: "grant_type=refresh_token&refresh_token=\(enc(refreshToken))&client_id=\(enc(clientID))")
+    }
+
+    /// 解析 token 响应为 OAuthTokens。refresh 响应可能不返回 refresh_token，用 fallback。
+    public static func parseTokenResponse(_ data: Data, fallbackRefresh: String = "") throws -> OAuthTokens {
+        struct Resp: Decodable {
+            let access_token: String
+            let refresh_token: String?
+            let id_token: String?
+            let expires_in: Double?
+        }
+        guard let r = try? JSONDecoder().decode(Resp.self, from: data) else {
+            throw ProviderError.invalidResponse
+        }
+        let accountId = accountID(fromJWT: r.access_token) ?? accountID(fromJWT: r.id_token ?? "") ?? ""
+        return OAuthTokens(
+            accessToken: r.access_token,
+            refreshToken: r.refresh_token ?? fallbackRefresh,
+            idToken: r.id_token ?? "",
+            accountId: accountId,
+            expiresAt: Date().addingTimeInterval(r.expires_in ?? 3600))
+    }
+
+    /// 解 JWT payload，取 ["https://api.openai.com/auth"]["chatgpt_account_id"]。
+    public static func accountID(fromJWT jwt: String) -> String? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var b64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let auth = obj["https://api.openai.com/auth"] as? [String: Any],
+              let acct = auth["chatgpt_account_id"] as? String else { return nil }
+        return acct
+    }
+
+    private static func formPost(body: String) -> URLRequest {
+        var req = URLRequest(url: URL(string: tokenEndpoint)!)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(body.utf8)
+        return req
+    }
+
+    private static func enc(_ s: String) -> String {
+        // RFC 3986 unreserved 字符（含 _ - . ~）不编码，其余编码；
+        // 保证 client_id 的下划线在 form body 中保持原样。
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
+    }
+}
