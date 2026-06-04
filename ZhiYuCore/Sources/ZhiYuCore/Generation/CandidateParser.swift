@@ -9,24 +9,24 @@ public enum CandidateParser {
         items = items
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .filter { $0.range(of: stickerLinePattern, options: .regularExpression) == nil }
+            .filter { $0.range(of: stickerPrefix, options: .regularExpression) == nil }
             .filter { seen.insert($0).inserted }
         return Array(items.prefix(max))
     }
 
-    /// 匹配独立的"表情: 关键词"行的正则（半/全角冒号）。
-    private static let stickerLinePattern = "^\\s*表情\\s*[:：]"
+    /// 匹配行首"表情: "前缀的共享子模式（半/全角冒号）：兜底过滤与 parseSticker 共用。
+    private static let stickerPrefix = "^\\s*表情\\s*[:：]"
 
     /// 解析可选的"表情关键词"：匹配独立的一行 `表情: 关键词` / `表情：关键词`（半/全角冒号）。
     /// 去掉引号/方括号/书名号；"无"/"none"/"没有"视为不建议表情，返回 nil。
     public static func parseSticker(_ raw: String) -> String? {
-        guard let r = raw.range(of: "(?m)^\\s*表情\\s*[:：]\\s*(.+)$", options: .regularExpression) else {
+        // 多行模式下复用 stickerPrefix，并用捕获组直接取关键词。
+        guard let re = try? NSRegularExpression(pattern: "(?m)" + stickerPrefix + "\\s*(.+)$"),
+              let m = re.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let keywordRange = Range(m.range(at: 1), in: raw) else {
             return nil
         }
-        var s = String(raw[r])
-        if let colon = s.range(of: "[:：]", options: .regularExpression) {
-            s = String(s[colon.upperBound...])
-        }
+        var s = String(raw[keywordRange])
         s = s.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"'「」『』【】[]()（）"))
         let lowered = s.lowercased()
         if s.isEmpty || ["无", "没有", "none", "n/a", "不需要"].contains(lowered) { return nil }
