@@ -92,7 +92,7 @@ struct CandidatePanelView: View {
                                 .fill(.white.opacity(0.06)))
                     }
                 } else {
-                    Text(c)
+                    Text(bubbles.first ?? c)
                         .font(.body)
                         .foregroundStyle(.white.opacity(0.95))
                         .frame(maxWidth: .infinity, alignment: .leading)
