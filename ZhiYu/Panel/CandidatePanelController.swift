@@ -135,25 +135,19 @@ final class CandidatePanelController: NSObject {
     }
 
     /// 后台仅暖缓存（不弹面板、不更新 lastSeenSig，以便切前台仍会展示）。
-    /// 含未转语音的会话：先转写并等完成，再重读得到转写后的新 ctx，对新 ctx 暖缓存——
-    /// 这样切前台 present 重读后命中缓存秒出，不再留到前台才转写+生成。
+    /// 含未转语音的会话直接跳过：后台转写会触发 app.activate 抢焦点，语音的转写只在前台 present() 里做。
     private func prewarm(snapshot: WeChatReader.Snapshot) {
         let ctx = snapshot.context
+        guard !ctx.messages.contains(where: { $0.text.contains("[语音]") }) else { return }  // 含未转语音的会话不在后台预暖（避免转写抢焦点）
         let sig = MessageSignal.signature(ctx)                // dedup 用进入时原始 ctx 的指纹作键（同一触发不重复预暖）
         guard lastPrewarmSig[ctx.contactName] != sig else { return }
         let style = AppConfig.shared.currentStyle()
         Task {
             do {
-                // 含未转语音：转写到完成后重读，对转写后的新 ctx 暖缓存；不含语音则直接对原 ctx 暖。
-                var genCtx = ctx
-                if ctx.messages.contains(where: { $0.text.contains("[语音]") }) {
-                    await VoiceTranscriber.transcribeRecentAndWait()
-                    if let fresh = WeChatReader.readSnapshot() { genCtx = fresh.context }
-                }
                 let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
-                _ = try await gen.generate(context: genCtx, style: style)
-                self.lastPrewarmSig[ctx.contactName] = sig   // 成功后才记指纹（仍用原始 ctx 指纹）；失败留待重试
+                _ = try await gen.generate(context: ctx, style: style)
+                self.lastPrewarmSig[ctx.contactName] = sig   // 成功后才记指纹；失败留待重试
             } catch { }
         }
     }
