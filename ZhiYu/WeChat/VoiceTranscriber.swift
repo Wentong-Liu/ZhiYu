@@ -82,8 +82,6 @@ enum VoiceTranscriber {
     /// （那可能是上一条残留菜单或菜单还没填充好）。只有整个窗口都没等到才放弃。
     private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
         guard actions(bubble).contains("AXShowMenu") else { return false }
-        // 弹菜单前先确保无残留菜单，避免本条 AXShowMenu 命中旧菜单。
-        await waitMenuDismissed(panel: panel)
         // 临时埋点：单独测 AXShowMenu 调用本身耗时（怀疑此调用阻塞 ~1.5s）。
         let tA = ProcessInfo.processInfo.systemUptime
         AXUIElementSetMessagingTimeout(bubble, 0.05)  // 该 AX 调用最多等 50ms 就返回；菜单已弹出，无需傻等 ~1.5s
@@ -92,6 +90,7 @@ enum VoiceTranscriber {
 
         // 0.6s 窗口内持续轮询（步进 20ms），等「转文字」项出现。热路径只查右面板（瞬时）。
         var target: AXUIElement?
+        var foundMenu: AXUIElement?
         var iters = 0  // 临时埋点：轮询迭代次数
         let tLoop = ProcessInfo.processInfo.systemUptime  // 临时埋点：轮询起点
         let start = ProcessInfo.processInfo.systemUptime
@@ -100,6 +99,7 @@ enum VoiceTranscriber {
             if Task.isCancelled { return false }  // ESC 已取消：放弃本条触发
             if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) {
                 target = it
+                foundMenu = menu
                 break
             }
             try? await Task.sleep(nanoseconds: 20_000_000)
@@ -124,7 +124,7 @@ enum VoiceTranscriber {
             // 整个窗口都没等到「转文字」：兜底关掉此刻任何遗留菜单，再放弃这条。
             if let stray = dfsMenu(panel) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
-                await waitMenuDismissed(panel: panel)
+                await waitMenuClosed(stray)
             }
             return false
         }
@@ -132,7 +132,7 @@ enum VoiceTranscriber {
         AXUIElementPerformAction(target, "AXPress" as CFString)  // 选中即关菜单并开始转写（服务器异步转）
         // AXPress 后也等菜单收起（短超时），避免下一条 AXShowMenu 命中本条还没收起的旧菜单。
         let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点：AXPress 后等关菜单起点
-        await waitMenuDismissed(panel: panel)
+        if let m = foundMenu { await waitMenuClosed(m) }
         let dismissMs = (ProcessInfo.processInfo.systemUptime - tPress) * 1000  // 临时埋点：关菜单耗时
         NSLog("[VT] 单条: AXShowMenu=%.0fms 轮询=%.0fms(%d次) via=%@ panelNodes=%d 关菜单=%.0fms",
               showMs, loopMs, iters, foundInPanel ? "panel" : (target != nil ? "FALLBACK" : "none"), panelNodes, dismissMs)
@@ -145,14 +145,15 @@ enum VoiceTranscriber {
         return t.contains("已转文字") || !t.contains("发送了一个语音")
     }
 
-    /// 轮询直到右面板内已无 AXMenu（菜单收起）或 ~0.35s 超时；步进 20ms。
-    /// 只查右面板（瞬时），不再做全树扫描；只等菜单关闭，不等转写结果，整体仍是「快速点过去」的策略。
-    private static func waitMenuDismissed(panel: AXUIElement) async {
+    /// 廉价地等"指定菜单元素"关闭：只查这一个元素是否还是 AXMenu（单元素、~毫秒级），
+    /// 并给它设 50ms 消息超时，避免对已失效元素的查询阻塞。最多等 0.3s。
+    private static func waitMenuClosed(_ menu: AXUIElement) async {
+        AXUIElementSetMessagingTimeout(menu, 0.05)
         let start = ProcessInfo.processInfo.systemUptime
-        while ProcessInfo.processInfo.systemUptime - start < 0.35 {
-            if Task.isCancelled { return }  // ESC 已取消：停止等待菜单收起
-            if dfsMenu(panel) == nil { return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
+        while ProcessInfo.processInfo.systemUptime - start < 0.3 {
+            if Task.isCancelled { return }
+            if WeChatAXProbe.role(menu) != "AXMenu" { return }  // 元素已失效/不再是菜单 = 已关
+            try? await Task.sleep(nanoseconds: 15_000_000)
         }
     }
 
