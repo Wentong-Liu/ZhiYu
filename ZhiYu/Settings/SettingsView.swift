@@ -25,7 +25,7 @@ final class SettingsModel: ObservableObject {
 
     func syncForKind() {
         switch kind {
-        case .openAI: apiKey = KeychainStore.openAIKey(); if model.isEmpty { model = "gpt-4o" }
+        case .openAI: apiKey = KeychainStore.openAIKey(); model = "gpt-4o"
         case .deepSeek: apiKey = KeychainStore.deepSeekKey(); model = "deepseek-v4-flash"
         case .chatGPT: model = "gpt-5.5"
         }
