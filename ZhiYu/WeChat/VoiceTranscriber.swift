@@ -77,65 +77,53 @@ enum VoiceTranscriber {
 
     // MARK: - 单条触发
 
-    /// 触发单条气泡的「转文字」。成功点到「转文字」返回 true，否则 false（自己发的/不支持/没等到）。
-    /// 关键：在 0.6s 窗口内**持续等待**「转文字」项出现；不因"出现了一个没有转文字项的菜单"就取消跳过
-    /// （那可能是上一条残留菜单或菜单还没填充好）。只有整个窗口都没等到才放弃。
     private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
         guard actions(bubble).contains("AXShowMenu") else { return false }
-        // 临时埋点：单独测 AXShowMenu 调用本身耗时（怀疑此调用阻塞 ~1.5s）。
-        let tA = ProcessInfo.processInfo.systemUptime
-        AXUIElementSetMessagingTimeout(bubble, 0.05)  // 该 AX 调用最多等 50ms 就返回；菜单已弹出，无需傻等 ~1.5s
-        AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
-        let showMs = (ProcessInfo.processInfo.systemUptime - tA) * 1000
-
-        // 0.6s 窗口内持续轮询（步进 20ms），等「转文字」项出现。热路径只查右面板（瞬时）。
         var target: AXUIElement?
         var foundMenu: AXUIElement?
-        var iters = 0  // 临时埋点：轮询迭代次数
-        let tLoop = ProcessInfo.processInfo.systemUptime  // 临时埋点：轮询起点
-        let start = ProcessInfo.processInfo.systemUptime
-        while ProcessInfo.processInfo.systemUptime - start < 0.6 {
-            iters += 1
-            if Task.isCancelled { return false }  // ESC 已取消：放弃本条触发
-            if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) {
-                target = it
-                foundMenu = menu
-                break
+        var attempts = 0
+        let tStart = ProcessInfo.processInfo.systemUptime
+        let overallDeadline = tStart + 1.6
+        // 重试打开菜单：刚关上一个菜单后，微信可能短暂拒绝 AXShowMenu(立即返回、菜单没出来)，重试即可。
+        while ProcessInfo.processInfo.systemUptime < overallDeadline, target == nil {
+            if Task.isCancelled { return false }
+            attempts += 1
+            AXUIElementSetMessagingTimeout(bubble, 0.05)  // 该调用最多等 50ms 返回(菜单是 WeChat 副作用、照样弹出)
+            AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
+            // 短轮询等菜单出现并拿到「转文字」项（热路径只查右面板，瞬时）。
+            let pollEnd = ProcessInfo.processInfo.systemUptime + 0.25
+            while ProcessInfo.processInfo.systemUptime < pollEnd {
+                if Task.isCancelled { return false }
+                if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) {
+                    target = it
+                    foundMenu = menu
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 20_000_000)
             }
-            try? await Task.sleep(nanoseconds: 20_000_000)
+            if target == nil {
+                try? await Task.sleep(nanoseconds: 100_000_000)  // 菜单没出来(被微信短暂拒绝)→稍等再重试 AXShowMenu
+            }
         }
-        let loopMs = (ProcessInfo.processInfo.systemUptime - tLoop) * 1000  // 临时埋点：轮询总耗时
-        // 临时埋点：右面板轮询结束时的节点数 / 是否在右面板命中
-        let panelNodes = Self.lastDfsNodes
-        let foundInPanel = (target != nil)
-
-        // 一次性全树兜底：右面板没找到时，才做一次慢但稳的全树深遍历（每条最多一次）。
+        // 一次性全树兜底（右面板始终没找到时，才做一次慢但稳的全树深遍历）。
         if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) {
             target = it
+            foundMenu = menu
         }
-        // 临时埋点：若走了全树兜底（右面板未命中但兜底命中），记 fallback 那次 dfsMenu(appEl) 的节点数；否则 -1
-        let fallbackNodes = (!foundInPanel && target != nil) ? Self.lastDfsNodes : -1
-        _ = fallbackNodes  // 暂留兜底节点数变量（细化日志已不打印），避免误删兜底逻辑
-
+        let findMs = (ProcessInfo.processInfo.systemUptime - tStart) * 1000  // 临时埋点：找菜单总耗时
         guard let target else {
-            // 临时埋点：none 路径也记一行，便于核对没找到的占比与耗时
-            NSLog("[VT] 单条: AXShowMenu=%.0fms 轮询=%.0fms(%d次) via=none panelNodes=%d 关菜单=-1ms",
-                  showMs, loopMs, iters, panelNodes)
-            // 整个窗口都没等到「转文字」：兜底关掉此刻任何遗留菜单，再放弃这条。
+            NSLog("[VT] 单条: 找菜单=%.0fms 尝试=%d次 via=none", findMs, attempts)
             if let stray = dfsMenu(panel) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
                 await waitMenuClosed(stray)
             }
             return false
         }
-
         AXUIElementPerformAction(target, "AXPress" as CFString)  // 选中即关菜单并开始转写（服务器异步转）
-        // AXPress 后也等菜单收起（短超时），避免下一条 AXShowMenu 命中本条还没收起的旧菜单。
-        let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点：AXPress 后等关菜单起点
+        let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点：关菜单起点
         if let m = foundMenu { await waitMenuClosed(m) }
         let dismissMs = (ProcessInfo.processInfo.systemUptime - tPress) * 1000  // 临时埋点：关菜单耗时
-        NSLog("[VT] 单条: AXShowMenu=%.0fms 轮询=%.0fms(%d次) via=%@ panelNodes=%d 关菜单=%.0fms",
-              showMs, loopMs, iters, foundInPanel ? "panel" : (target != nil ? "FALLBACK" : "none"), panelNodes, dismissMs)
+        NSLog("[VT] 单条: 找菜单=%.0fms 尝试=%d次 via=panel 关菜单=%.0fms", findMs, attempts, dismissMs)
         return true
     }
 
