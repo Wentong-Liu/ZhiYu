@@ -17,6 +17,7 @@ enum VoiceTranscriber {
         if isRunning {
             let start = ProcessInfo.processInfo.systemUptime
             while isRunning, ProcessInfo.processInfo.systemUptime - start < timeout {
+                if Task.isCancelled { return }  // ESC 已取消：不再等待
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             return
@@ -25,6 +26,7 @@ enum VoiceTranscriber {
         defer { isRunning = false }
 
         guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return }
+        if Task.isCancelled { return }  // ESC 已取消：不要再 activate 把微信拉前台
         app.activate(options: [])
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
         WeChatAXProbe.wakeAccessibility(appEl)
@@ -39,6 +41,7 @@ enum VoiceTranscriber {
         // 逐条快速触发，收集"成功点了转文字"的气泡，稍后轮询它们是否转写落地。
         var pressed: [AXUIElement] = []
         for bubble in targets {
+            if Task.isCancelled { break }  // ESC 已取消：停止逐条触发，不再 AXShowMenu
             if await triggerTranscribe(bubble, appEl: appEl) { pressed.append(bubble) }
         }
         guard !pressed.isEmpty else { return }
@@ -46,6 +49,7 @@ enum VoiceTranscriber {
         // 转完再返回：轮询直到 pressed 里每个气泡都已转写或 timeout 到（步进 ~300ms）。
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         while ProcessInfo.processInfo.systemUptime < deadline {
+            if Task.isCancelled { return }  // ESC 已取消：停止等待转写落地
             if pressed.allSatisfy(isTranscribed) { break }
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
@@ -76,6 +80,7 @@ enum VoiceTranscriber {
         var target: AXUIElement?
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.6 {
+            if Task.isCancelled { return false }  // ESC 已取消：放弃本条触发
             if let menu = findMenu(appEl), let it = transcribeItem(in: menu) {
                 target = it
                 break
@@ -109,6 +114,7 @@ enum VoiceTranscriber {
     private static func waitMenuDismissed(appEl: AXUIElement) async {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.35 {
+            if Task.isCancelled { return }  // ESC 已取消：停止等待菜单收起
             if findMenu(appEl) == nil { return }
             try? await Task.sleep(nanoseconds: 25_000_000)
         }

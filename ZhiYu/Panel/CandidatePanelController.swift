@@ -25,6 +25,8 @@ final class CandidatePanelController: NSObject {
     private var isBusy = false
     /// present 代际令牌：新 present 取代在飞旧 present 时自增，旧 Task 完成时凭此识别自己已陈旧、不再写回。
     private var presentGeneration = 0
+    /// 当前在飞的 present 任务：ESC/dismiss 时取消，让转写循环立即停、不再 AXShowMenu/把微信拉前台。
+    private var currentTask: Task<Void, Never>?
 
     /// 双击触发：读当前会话快照并展示。
     func trigger() {
@@ -52,13 +54,15 @@ final class CandidatePanelController: NSObject {
         lastSeenSig[snapshot.context.contactName] = MessageSignal.signature(snapshot.context)  // 标记已展示
         showPanel(anchorAXFrame: frame)
         let style = AppConfig.shared.currentStyle()
-        Task {
+        currentTask?.cancel()  // 取代在飞的旧任务（其转写循环会响应取消立即停）
+        currentTask = Task {
             do {
                 // 若会话里有"未转文字"的语音 → 取最近 5 条触发转写并等到完成，转写回来后重读。
                 // transcribeRecentAndWait 已等到转写落地，故重读拿到的是转写后的文本，generate 不会用 [语音] 占位。
                 if baseContext.messages.contains(where: { $0.text.contains("[语音]") }) {
                     if generation == self.presentGeneration { self.model.loadingNote = "转写语音中…" }
                     await VoiceTranscriber.transcribeRecentAndWait()
+                    if Task.isCancelled { return }  // ESC 已取消：不再重读/生成
                     if let fresh = WeChatReader.readSnapshot() {
                         baseContext = fresh.context
                         imageFrames = fresh.imageFrames
@@ -241,6 +245,8 @@ final class CandidatePanelController: NSObject {
     }
 
     func dismiss() {
+        currentTask?.cancel(); currentTask = nil  // 取消在飞转写/生成，转写循环立即停、不再 AXShowMenu/拉前台
+        isBusy = false                            // 取消后不要卡在 busy，否则自动评估会被一直抑制
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         if let m = escGlobalMonitor { NSEvent.removeMonitor(m); escGlobalMonitor = nil }
         panel?.close()
