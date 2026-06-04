@@ -20,4 +20,10 @@ enum WeChatReader {
             return ChatContext(contactName: r.contactName, messages: msgs, draft: r.draft)
         }
     }
+
+    /// 当前会话输入框的屏幕 frame（AX 左上原点坐标），读不到返回 nil。
+    static func composerFrame() -> CGRect? {
+        if case .success(let r) = WeChatAXProbe.run() { return r.inputFrame }
+        return nil
+    }
 }
