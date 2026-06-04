@@ -143,15 +143,23 @@ enum VoiceTranscriber {
         return out
     }
 
-    /// 浅查上下文菜单：AXMenu 一般是 application 的顶层子节点。只在 appEl 浅层（深度≤3）小范围查找，
-    /// 绝不深入左侧会话巨表（避免数秒级遍历）。
+    /// 找上下文菜单 AXMenu：深遍历 appEl，但**跳过行数巨大的会话/消息表**（AXTable/AXOutline，
+    /// 左侧会话列表上千行是数秒延迟根源，菜单绝不在其中）——既能命中又快。
+    /// 剪枝版找不到时，退回完整深遍历兜底，保证可靠性不低于原实现。
     private static func findMenu(_ appEl: AXUIElement) -> AXUIElement? {
+        if let m = findMenuDFS(appEl, prune: true) { return m }
+        return findMenuDFS(appEl, prune: false)   // 兜底：完整深遍历（慢但稳）
+    }
+
+    private static func findMenuDFS(_ appEl: AXUIElement, prune: Bool) -> AXUIElement? {
         var result: AXUIElement?
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if result != nil || n > 300 || d > 3 { return }
+            if result != nil || n > (prune ? 5000 : 8000) || d > 45 { return }
             n += 1
-            if WeChatAXProbe.role(el) == "AXMenu" { result = el; return }
+            let r = WeChatAXProbe.role(el)
+            if r == "AXMenu" { result = el; return }
+            if prune, r == "AXTable" || r == "AXOutline" { return }  // 不下钻巨表
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
         }
         walk(appEl, 0)
