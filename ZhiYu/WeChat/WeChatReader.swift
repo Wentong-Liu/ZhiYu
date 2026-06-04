@@ -35,8 +35,8 @@ enum WeChatReader {
     private static func context(from r: WeChatAXProbe.ProbeResult) -> ChatContext {
         let msgs: [ChatMessage] = r.messages.compactMap { m in
             switch m.speaker {
-            case .me:    return ChatMessage(speaker: .me, text: m.text)
-            case .other: return ChatMessage(speaker: .other, text: m.text)
+            case .me:    return ChatMessage(speaker: .me, text: VoiceText.clean(m.text))
+            case .other: return ChatMessage(speaker: .other, text: VoiceText.clean(m.text))
             case .separator: return nil   // 时间/系统分隔行不进上下文
             }
         }
