@@ -11,5 +11,9 @@ DerivedData/
 .swiftpm/
 Package.resolved
 
+# 误产生的构建输出目录
+build/
+**/build/
+
 # 本地诊断/临时笔记（含微信聊天 PII，绝不提交）
 .local-notes/
