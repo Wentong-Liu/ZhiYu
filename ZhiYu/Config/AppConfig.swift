@@ -36,7 +36,15 @@ final class AppConfig {
         set { d.set(newValue.rawValue, forKey: "providerKind") }
     }
     var model: String {
-        get { d.string(forKey: "model") ?? "gpt-4o" }
+        // 夹回到当前 Provider 的可选模型：持久化的 model 若不属于当前 providerKind
+        // （例如换过 Provider 但没点过模型下拉），回落到该 Provider 的默认模型，
+        // 避免把不属于该 Provider 的 model id 发给 API。
+        get {
+            let stored = d.string(forKey: "model")
+            let valid = providerKind.modelOptions.map(\.id)
+            if let stored, valid.contains(stored) { return stored }
+            return providerKind.defaultModel
+        }
         set { d.set(newValue, forKey: "model") }
     }
     var styleIndex: Int {

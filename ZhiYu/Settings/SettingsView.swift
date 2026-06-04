@@ -15,7 +15,12 @@ final class SettingsModel: ObservableObject {
 
     init() {
         kind = AppConfig.shared.providerKind
-        model = AppConfig.shared.model
+        // 校验：持久化的 model 必须属于当前 providerKind.modelOptions，
+        // 否则 Picker 会空选/无高亮，且会把不属于该 Provider 的 model id 发给 API。
+        let validModels = AppConfig.shared.providerKind.modelOptions.map(\.id)
+        model = validModels.contains(AppConfig.shared.model)
+            ? AppConfig.shared.model
+            : AppConfig.shared.providerKind.defaultModel
         styleIndex = AppConfig.shared.styleIndex
         customPrompt = ""
         switch AppConfig.shared.providerKind {
