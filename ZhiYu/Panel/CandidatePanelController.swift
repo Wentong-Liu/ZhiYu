@@ -75,9 +75,12 @@ final class CandidatePanelController: NSObject {
         p.hasShadow = false
         p.contentView = hosting
 
+        // AX->AppKit 是基于主屏高度的全局 y 翻转（与 composer 落在哪块屏无关）；副屏的
+        // x/y 偏移已隐含在 AX 全局坐标里，所以这里传主屏高度而非目标屏高度。
         var origin = PanelPositioning.panelOrigin(composerAXFrame: axFrame,
-                                                  screenHeight: screen?.frame.height ?? 1000, gap: 8)
-        // size.height 已 <= available <= vf.height，夹取必落在屏内
+                                                  primaryScreenHeight: Self.primaryScreenHeight, gap: 8)
+        // 换算后的 origin 已是 AppKit 全局坐标；下面用目标屏的全局 visibleFrame 夹取，
+        // size.height 已 <= available <= vf.height，夹取必落在该屏可视区内。
         origin.x = max(vf.minX, min(origin.x, vf.maxX - size.width))
         origin.y = max(vf.minY, min(origin.y, vf.maxY - size.height))
         p.setFrameOrigin(origin)
@@ -135,10 +138,18 @@ final class CandidatePanelController: NSObject {
         panel = nil
     }
 
+    /// 主显示器（含 AppKit 全局原点、frame.origin == (0,0) 的屏）的高度；AX/CG 全局 y 翻转的基准。
+    /// AX 与 AppKit 共享全局平面、原点都锚在主屏，故用主屏高度做 `appKitY = h - axY` 的全局换算。
+    private static var primaryScreenHeight: CGFloat {
+        let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.screens.first
+        return primary?.frame.height ?? 1000
+    }
+
     private func screenContaining(axPointTopLeft p: CGPoint) -> NSScreen? {
-        // AX 点为左上原点；转 AppKit 后判断落在哪个屏幕。用主屏高换算近似（多屏精确换算 Phase 5 再细化）。
-        let h = NSScreen.screens.first?.frame.height ?? 0
-        let appKitPoint = CGPoint(x: p.x, y: h - p.y)
+        // AX 点为左上原点、全局坐标（原点在主屏左上）；用主屏高度做全局 y 翻转得到 AppKit 全局点，
+        // 再按各屏的全局 frame（含 x/y 偏移）判断归属——主副屏一致，无须近似。
+        let appKitPoint = CGPoint(x: p.x, y: Self.primaryScreenHeight - p.y)
         return NSScreen.screens.first(where: { $0.frame.contains(appKitPoint) })
     }
 }
