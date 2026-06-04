@@ -2,19 +2,20 @@ import SwiftUI
 import Combine
 import ZhiYuCore
 
-enum ProviderKind: String, CaseIterable, Identifiable {
-    case openAI = "OpenAI"
-    case deepSeek = "DeepSeek"
-    case chatGPT = "ChatGPT 登录"
-    var id: String { rawValue }
-}
-
 @MainActor
 final class GenerateViewModel: ObservableObject {
-    @Published var kind: ProviderKind = .openAI
+    // kind/model/styleIndex 以 AppConfig（UserDefaults）为唯一事实来源；
+    // @Published 仅作 UI 镜像，didSet 回写 AppConfig，使悬浮面板/双击触发也能读到当前配置。
+    @Published var kind: ProviderKind = AppConfig.shared.providerKind {
+        didSet { AppConfig.shared.providerKind = kind }
+    }
     @Published var apiKey: String = KeychainStore.openAIKey()
-    @Published var model: String = "gpt-4o"
-    @Published var styleIndex: Int = 0
+    @Published var model: String = AppConfig.shared.model {
+        didSet { AppConfig.shared.model = model }
+    }
+    @Published var styleIndex: Int = AppConfig.shared.styleIndex {
+        didSet { AppConfig.shared.styleIndex = styleIndex }
+    }
     @Published var status: String = ""
     @Published var candidates: [String] = []
     @Published var isLoading = false
@@ -22,6 +23,15 @@ final class GenerateViewModel: ObservableObject {
 
     private let cache = CandidateCache()
     let styles = ReplyStyle.presets
+
+    init() {
+        // 按当前 Provider 同步默认 key（model 由 AppConfig 提供，不覆盖用户已选模型）。
+        switch kind {
+        case .openAI:  apiKey = KeychainStore.openAIKey()
+        case .deepSeek: apiKey = KeychainStore.deepSeekKey()
+        case .chatGPT: break
+        }
+    }
 
     /// 切换 Provider 时调整默认 key/model。
     func onKindChange() {
@@ -62,9 +72,13 @@ final class GenerateViewModel: ObservableObject {
         let style = styles[styleIndex]
         isLoading = true; candidates = []
         status = "生成中…（联系人：\(context.contactName)，\(context.messages.count) 条上下文）"
+        // 生成前把当前选择同步进 AppConfig，悬浮面板/双击触发与探针面板用同一套配置。
+        AppConfig.shared.providerKind = kind
+        AppConfig.shared.model = model
+        AppConfig.shared.styleIndex = styleIndex
         Task {
             do {
-                let provider = try await makeProvider()
+                let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: cache, candidateCount: 3)
                 let result = try await gen.generate(context: context, style: style)
                 self.candidates = result
@@ -73,25 +87,6 @@ final class GenerateViewModel: ObservableObject {
                 self.status = "失败：\(error)"
             }
             self.isLoading = false
-        }
-    }
-
-    private func makeProvider() async throws -> any LLMProvider {
-        switch kind {
-        case .openAI:
-            let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .openAI(model: model), apiKey: k)
-        case .deepSeek:
-            let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .deepSeek(model: model), apiKey: k)
-        case .chatGPT:
-            guard let tokens = await CodexLoginService.shared.validTokens() else {
-                throw ProviderError.missingAPIKey
-            }
-            return CodexResponsesProvider(accessToken: tokens.accessToken,
-                                          accountId: tokens.accountId, model: model)
         }
     }
 
