@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		723314BA2FD114C1006F771A /* ZhiYuCore in Frameworks */ = {isa = PBXBuildFile; productRef = 723314B92FD114C1006F771A /* ZhiYuCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		723314582FD0A057006F771A /* ZhiYu.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZhiYu.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				723314BA2FD114C1006F771A /* ZhiYuCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = ZhiYu;
 			packageProductDependencies = (
+				723314B92FD114C1006F771A /* ZhiYuCore */,
 			);
 			productName = ZhiYu;
 			productReference = 723314582FD0A057006F771A /* ZhiYu.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 7233144F2FD0A057006F771A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				723314B82FD114C1006F771A /* XCLocalSwiftPackageReference "ZhiYuCore" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 723314592FD0A057006F771A /* Products */;
 			projectDirPath = "";
@@ -333,6 +342,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		723314B82FD114C1006F771A /* XCLocalSwiftPackageReference "ZhiYuCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ZhiYuCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		723314B92FD114C1006F771A /* ZhiYuCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ZhiYuCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 723314502FD0A057006F771A /* Project object */;
 }
