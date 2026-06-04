@@ -76,7 +76,7 @@ enum VoiceTranscriber {
         var target: AXUIElement?
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.6 {
-            if let menu = findFirstRole("AXMenu", in: appEl), let it = transcribeItem(in: menu) {
+            if let menu = findMenu(appEl), let it = transcribeItem(in: menu) {
                 target = it
                 break
             }
@@ -85,7 +85,7 @@ enum VoiceTranscriber {
 
         guard let target else {
             // 整个窗口都没等到「转文字」：兜底关掉此刻任何遗留菜单，再放弃这条。
-            if let stray = findFirstRole("AXMenu", in: appEl) {
+            if let stray = findMenu(appEl) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
                 await waitMenuDismissed(appEl: appEl)
             }
@@ -109,7 +109,7 @@ enum VoiceTranscriber {
     private static func waitMenuDismissed(appEl: AXUIElement) async {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.35 {
-            if findFirstRole("AXMenu", in: appEl) == nil { return }
+            if findMenu(appEl) == nil { return }
             try? await Task.sleep(nanoseconds: 25_000_000)
         }
     }
@@ -143,16 +143,18 @@ enum VoiceTranscriber {
         return out
     }
 
-    private static func findFirstRole(_ role: String, in root: AXUIElement) -> AXUIElement? {
+    /// 浅查上下文菜单：AXMenu 一般是 application 的顶层子节点。只在 appEl 浅层（深度≤3）小范围查找，
+    /// 绝不深入左侧会话巨表（避免数秒级遍历）。
+    private static func findMenu(_ appEl: AXUIElement) -> AXUIElement? {
         var result: AXUIElement?
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if result != nil || n > 6000 || d > 45 { return }
+            if result != nil || n > 300 || d > 3 { return }
             n += 1
-            if WeChatAXProbe.role(el) == role { result = el; return }
+            if WeChatAXProbe.role(el) == "AXMenu" { result = el; return }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
         }
-        walk(root, 0)
+        walk(appEl, 0)
         return result
     }
 
