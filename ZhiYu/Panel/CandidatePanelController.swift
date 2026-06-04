@@ -58,7 +58,7 @@ final class CandidatePanelController: NSObject {
         p.level = .floating
         p.isOpaque = false
         p.backgroundColor = .clear
-        p.hasShadow = true
+        p.hasShadow = false   // 方形窗口阴影会在圆角处露出方角；改由 SwiftUI 圆角 .shadow 出阴影
         p.contentView = hosting
 
         // 定位：找到 composer 所在屏幕，换算到 AppKit 坐标。

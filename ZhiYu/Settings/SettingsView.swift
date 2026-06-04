@@ -50,9 +50,23 @@ final class SettingsModel: ObservableObject {
     func logout() { KeychainStore.clearChatGPTTokens(); loggedIn = false; status = "已退出登录" }
 }
 
-private let accent = LinearGradient(
-    colors: [Color(red: 0.55, green: 0.36, blue: 0.96), Color(red: 0.27, green: 0.79, blue: 0.96)],
-    startPoint: .topLeading, endPoint: .bottomTrailing)
+/// 黑白灰按钮：filled=true 为主操作（稍亮的灰底），否则次级（更淡）。
+private struct MonoButton: ButtonStyle {
+    var filled: Bool = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .foregroundStyle(.white.opacity(0.92))
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.white.opacity(filled
+                        ? (configuration.isPressed ? 0.26 : 0.18)
+                        : (configuration.isPressed ? 0.12 : 0.06)))
+            )
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.1)))
+    }
+}
 
 struct SettingsView: View {
     @StateObject private var vm = SettingsModel()
@@ -73,19 +87,18 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: 460, height: 540)
-        .background(
-            ZStack {
-                Color.black.opacity(0.25)
-                Rectangle().fill(.ultraThinMaterial)
-            }.ignoresSafeArea()
-        )
+        .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
         .environment(\.colorScheme, .dark)
     }
 
     private var title: some View {
         HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(accent).frame(width: 26, height: 26)
-            Text("知语设置").font(.title2.weight(.semibold))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.white.opacity(0.12))
+                .frame(width: 28, height: 28)
+                .overlay(Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)))
+            Text("知语设置").font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(0.95))
         }
     }
 
@@ -96,11 +109,25 @@ struct SettingsView: View {
     private var providerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("模型来源")
-            Picker("", selection: $vm.kind) {
-                ForEach(ProviderKind.allCases) { Text($0.rawValue).tag($0) }
+            HStack(spacing: 4) {
+                ForEach(ProviderKind.allCases) { k in
+                    Button { vm.kind = k } label: {
+                        Text(k.rawValue)
+                            .font(.callout)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .foregroundStyle(vm.kind == k ? .white : .secondary)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(.white.opacity(vm.kind == k ? 0.16 : 0))
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
+            .padding(3)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.white.opacity(0.05)))
         }
     }
 
@@ -110,18 +137,18 @@ struct SettingsView: View {
                 sectionHeader("ChatGPT 账号")
                 HStack(spacing: 10) {
                     Label(vm.loggedIn ? "已登录" : "未登录",
-                          systemImage: vm.loggedIn ? "checkmark.seal.fill" : "person.crop.circle")
-                        .foregroundStyle(vm.loggedIn ? .green : .secondary)
+                          systemImage: vm.loggedIn ? "checkmark.circle.fill" : "person.crop.circle")
+                        .foregroundStyle(vm.loggedIn ? .white.opacity(0.9) : .secondary)
                     Spacer()
                     Button(vm.loggedIn ? "重新登录" : "用 ChatGPT 登录") { vm.login() }
-                        .buttonStyle(.borderedProminent).tint(.purple)
-                    if vm.loggedIn { Button("退出") { vm.logout() }.buttonStyle(.bordered) }
+                        .buttonStyle(MonoButton(filled: true))
+                    if vm.loggedIn { Button("退出") { vm.logout() }.buttonStyle(MonoButton()) }
                 }
             } else {
                 sectionHeader("API Key")
                 HStack(spacing: 10) {
                     SecureField("粘贴你的 API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
-                    Button("保存") { vm.saveKey() }.buttonStyle(.borderedProminent).tint(.purple)
+                    Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
                 }
             }
         }
@@ -134,7 +161,7 @@ struct SettingsView: View {
                 TextField("模型名", text: $vm.model).textFieldStyle(.roundedBorder).frame(maxWidth: .infinity)
                 Picker("", selection: $vm.styleIndex) {
                     ForEach(Array(vm.styles.enumerated()), id: \.offset) { i, s in Text(s.name).tag(i) }
-                }.labelsHidden().frame(width: 130)
+                }.labelsHidden().frame(width: 130).tint(.white)
             }
         }
     }
@@ -143,12 +170,12 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("触发方式")
             HStack(spacing: 8) {
-                Image(systemName: "command")
+                Image(systemName: "command").foregroundStyle(.white.opacity(0.8))
                 Text("在微信里 双击右 ⌘ 唤起候选面板").font(.callout).foregroundStyle(.secondary)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
         }
     }
 }
