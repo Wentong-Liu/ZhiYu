@@ -12,15 +12,17 @@ final class CandidatePanelController: NSObject {
     private let model = CandidatePanelModel()
     private let cache = CandidateCache()
     private var keyMonitor: Any?
-    private var outsideClickMonitor: Any?
-    private var localClickMonitor: Any?
+    private var escGlobalMonitor: Any?
 
-    /// 已展示过的会话指纹（展示去重，避免 watcher 重复弹同一条）。
-    private var lastAutoSignature: String?
-    /// 已后台预暖过的会话指纹（预暖去重）。
-    private var lastPrewarmSignature: String?
+    /// 按联系人记的"已展示/已建基线"会话指纹：只有当前打开会话的指纹相对基线变化、且最后一条是对方发的，
+    /// 才算新消息。避免"联系人 A 来消息但当前开着 B"时误把 B 当新消息弹出来。
+    private var lastSeenSig: [String: String] = [:]
+    /// 按联系人记的"已预暖"会话指纹（预暖去重）。
+    private var lastPrewarmSig: [String: String] = [:]
     /// 上次廉价指纹（高频去重前移：相同则不跑昂贵的完整快读）。
     private var lastCheapSignature: String?
+    /// 一次 present 的 Task 是否在飞：转文字会改动微信 AX→触发 watcher，须在此期间抑制自动评估的 re-entry，避免重复弹。
+    private var isBusy = false
 
     /// 双击触发：读当前会话快照并展示。
     func trigger() {
@@ -32,21 +34,33 @@ final class CandidatePanelController: NSObject {
     /// 用给定快照展示候选面板（手动/自动共用）。
     private func present(snapshot: WeChatReader.Snapshot) {
         guard !snapshot.context.messages.isEmpty, let frame = snapshot.composerFrame else { NSSound.beep(); return }
-        // 双击是键盘手势，鼠标"外部点击"监听不会关掉上一个面板；重复展示前先收掉残留面板/监听，避免两个面板层叠。
-        dismiss()
-        let baseContext = snapshot.context
-        let imageFrames = snapshot.imageFrames
+        dismiss()  // 重复展示前先收掉残留面板/监听，避免层叠
+        isBusy = true
+        var baseContext = snapshot.context
+        var imageFrames = snapshot.imageFrames
         // 先复位到加载态再建面板：面板按"加载态"测高，内容到位后再 relayout，避免沿用上次内容的尺寸。
         model.isLoading = true
+        model.loadingNote = "生成中…"
         model.candidates = []
         model.stickerKeyword = nil
         model.status = ""
         model.providerLabel = AppConfig.shared.providerLabel
-        lastAutoSignature = MessageSignal.signature(snapshot.context)  // 记录，避免 watcher 重复弹同一条
+        lastSeenSig[snapshot.context.contactName] = MessageSignal.signature(snapshot.context)  // 标记已展示
         showPanel(anchorAXFrame: frame)
         let style = AppConfig.shared.currentStyle()
         Task {
             do {
+                // 若会话里有"未转文字"的语音 → 快速逐条触发转文字（新→旧、不等结果），转写回来后重读。
+                if baseContext.messages.contains(where: { $0.text.contains("[语音]") }) {
+                    self.model.loadingNote = "转写语音中…"
+                    await VoiceTranscriber.transcribeLoaded()
+                    if let fresh = WeChatReader.readSnapshot() {
+                        baseContext = fresh.context
+                        imageFrames = fresh.imageFrames
+                        self.lastSeenSig[baseContext.contactName] = MessageSignal.signature(baseContext)
+                    }
+                    self.model.loadingNote = "生成中…"
+                }
                 // 异步截取图片/表情气泡，附到上下文后再生成。无图时 urls 为空、上下文仅文本。
                 let urls = await WeChatReader.captureImages(imageFrames)
                 let context = WeChatReader.context(baseContext, withImages: urls)
@@ -58,59 +72,73 @@ final class CandidatePanelController: NSObject {
                 self.model.isLoading = false
                 if result.candidates.isEmpty && result.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
                 self.relayout()  // 内容到位后按真实高度重新布局
+                self.isBusy = false
             } catch {
                 self.model.isLoading = false
                 self.model.status = "失败：\(error)"
                 self.relayout()
+                self.isBusy = false
             }
         }
     }
 
-    /// 微信切到前台：当前会话有等我回的新消息且未处理过 → 展示（缓存暖则秒出）。
+    /// 微信切到前台：评估当前打开会话是否有新的对方消息 → 展示（缓存暖则秒出）。
     func autoOnActivate() {
         guard AppConfig.shared.autoOnNewMessage else { return }
-        guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
-              MessageSignal.lastIsIncoming(snap.context),
-              snap.composerFrame != nil else { return }   // 激活瞬间 AX 过渡态读不到输入框：静默放弃（不 beep）
-        // 我已经在打草稿（正自己回）：别抢面板。想要候选可手动双击右⌘。
-        guard snap.context.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
-        present(snapshot: snap)
+        evaluateAuto(canPresent: true)
     }
 
-    /// AX 事件（防抖+硬节流后）：有新消息→前台则直接展示，后台则仅预生成暖缓存（图片消息后台不预暖）。
-    /// 先做极廉价的预判（只读消息表行数+最后一行文本），与上次廉价指纹比对，相同就直接 return，
-    /// 不跑昂贵的完整快读 readSnapshot()——把去重前移到昂贵读取之前，真正抑制前台狂刷的卡顿。
+    /// AX 事件（防抖+硬节流后）：先做极廉价的预判（只读消息表行数+最后一行文本）抑制前台狂刷的昂贵快读，
+    /// 再评估当前打开会话。
     func autoOnDetect() {
         guard AppConfig.shared.autoOnNewMessage else { return }
         if let cheap = WeChatAXProbe.cheapSignature() {
             guard cheap != lastCheapSignature else { return }
             lastCheapSignature = cheap
         }
-        guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
-              MessageSignal.lastIsIncoming(snap.context) else { return }
-        guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
-        // 我正在打草稿就别抢面板；前台且没在打字、且能拿到输入框 frame 才弹，否则仅预暖。
-        let typing = !snap.context.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if isWeChatFrontmost() && !typing && snap.composerFrame != nil {
-            present(snapshot: snap)
+        evaluateAuto(canPresent: isWeChatFrontmost())
+    }
+
+    /// 统一评估当前"打开的会话"是否出现了新的对方消息。
+    /// 按联系人记基线：首次见到该会话只建基线不触发；只有指纹相对基线变化、且最后一条是对方发的才算新消息。
+    /// 这样"A 来消息但当前开着 B"时不会误弹 B（B 没变化）。
+    private func evaluateAuto(canPresent: Bool) {
+        guard !isBusy else { return }
+        guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty else { return }
+        let ctx = snap.context
+        let contact = ctx.contactName
+        let sig = MessageSignal.signature(ctx)
+        guard let baseline = lastSeenSig[contact] else {
+            lastSeenSig[contact] = sig   // 首次见到该会话：建基线，不触发
+            return
+        }
+        guard sig != baseline else { return }                 // 该会话没变化
+        guard MessageSignal.lastIsIncoming(ctx) else {         // 变了但最后一条不是对方（我发的/系统）：更新基线，不触发
+            lastSeenSig[contact] = sig; return
+        }
+        // 当前打开会话出现了新的、未展示过的对方消息
+        let typing = !ctx.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if canPresent && !typing && snap.composerFrame != nil {
+            present(snapshot: snap)                            // present 内会更新 lastSeenSig
         } else if snap.imageFrames.isEmpty {
-            prewarm(snapshot: snap)
+            prewarm(snapshot: snap)                            // 后台/正在打字：仅预暖，不更新基线（切前台仍会展示）
         }
     }
 
-    /// 后台仅暖缓存（不弹面板、不设 lastAutoSignature，以便切前台仍会展示）。仅文字/语音（无图）。
+    /// 后台仅暖缓存（不弹面板、不更新 lastSeenSig，以便切前台仍会展示）。
+    /// 跳过含未转语音的会话：转写后上下文会变，预暖会失效（留给切前台时转写+生成）。
     private func prewarm(snapshot: WeChatReader.Snapshot) {
-        let sig = MessageSignal.signature(snapshot.context)
-        guard sig != lastPrewarmSignature else { return }
-        let base = snapshot.context
+        let ctx = snapshot.context
+        guard !ctx.messages.contains(where: { $0.text.contains("[语音]") }) else { return }
+        let sig = MessageSignal.signature(ctx)
+        guard lastPrewarmSig[ctx.contactName] != sig else { return }
         let style = AppConfig.shared.currentStyle()
         Task {
             do {
                 let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
-                _ = try await gen.generate(context: base, style: style)
-                self.lastPrewarmSignature = sig   // 成功后才记指纹；失败留待同状态下次 AX 事件重试预暖
+                _ = try await gen.generate(context: ctx, style: style)
+                self.lastPrewarmSig[ctx.contactName] = sig   // 成功后才记指纹；失败留待重试
             } catch { }
         }
     }
@@ -140,7 +168,6 @@ final class CandidatePanelController: NSObject {
         p.orderFrontRegardless()
 
         installKeyMonitor()
-        installOutsideClickMonitor()
     }
 
     /// 按当前 model 内容重新测高、调整面板尺寸与位置（内容到位后调用）。
@@ -178,7 +205,10 @@ final class CandidatePanelController: NSObject {
         panel.setFrameOrigin(origin)
     }
 
-    /// 在面板存活期间用本地监听处理 1/2/3 与 Esc（nonactivatingPanel 下更稳）。
+    /// 面板存活期间的键盘处理：
+    /// - 本地监听：1/2/3 选中、Esc 关闭（面板恰为 key 时生效）。
+    /// - 全局 Esc 监听：自动弹出时微信在前台、本地监听收不到键，故再加全局 Esc 兜底关闭
+    ///   （只观察不吞事件，Esc 漏给微信无害）。不再监听"外部点击消失"——别的 app 弹窗点击会误关面板。
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel != nil else { return event }
@@ -195,32 +225,15 @@ final class CandidatePanelController: NSObject {
                 return event
             }
         }
-    }
-
-    /// 点击面板之外 -> 消失。nonactivatingPanel + accessory app 下 key 状态不可靠，
-    /// 不用 windowDidResignKey；改用显式的鼠标按下监听做确定性的「外部点击」消失。
-    /// - 全局监听：捕捉投向微信等其它 app 的点击（global monitor 只观察、不吞事件，点击照常落到微信）。
-    /// - 本地监听：捕捉投向本 app 自身的点击；若不在面板矩形内则消失，在面板内则放行（选卡片/发送）。
-    private func installOutsideClickMonitor() {
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
-            self?.dismiss()
+        escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.panel != nil else { return }
+            if (event.charactersIgnoringModifiers ?? "") == "\u{1B}" { self.dismiss() }
         }
-        // 本地监听需要返回 event；面板内点击放行，面板外点击消失。
-        let local = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            guard let self, let panel = self.panel else { return event }
-            if event.window === panel { return event }   // 面板内：放行（onTap/发送按钮）
-            self.dismiss()
-            return event
-        }
-        // 把本地监听一并挂在同一字段链上，dismiss 时统一移除。
-        localClickMonitor = local
     }
 
     func dismiss() {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
-        if let m = outsideClickMonitor { NSEvent.removeMonitor(m); outsideClickMonitor = nil }
-        if let m = localClickMonitor { NSEvent.removeMonitor(m); localClickMonitor = nil }
+        if let m = escGlobalMonitor { NSEvent.removeMonitor(m); escGlobalMonitor = nil }
         panel?.close()
         panel = nil
     }

@@ -5,6 +5,7 @@ import ZhiYuCore
 @MainActor
 final class CandidatePanelModel: ObservableObject {
     @Published var isLoading = true
+    @Published var loadingNote = "生成中…"
     @Published var status = ""
     @Published var candidates: [String] = []
     @Published var stickerKeyword: String? = nil
@@ -64,7 +65,7 @@ struct CandidatePanelView: View {
         if model.isLoading {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
-                Text("生成中…").font(.callout).foregroundStyle(.secondary)
+                Text(model.loadingNote).font(.callout).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
