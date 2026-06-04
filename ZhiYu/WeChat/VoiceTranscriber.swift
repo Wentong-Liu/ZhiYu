@@ -42,7 +42,7 @@ enum VoiceTranscriber {
         var pressed: [AXUIElement] = []
         for bubble in targets {
             if Task.isCancelled { break }  // ESC 已取消：停止逐条触发，不再 AXShowMenu
-            if await triggerTranscribe(bubble, appEl: appEl) { pressed.append(bubble) }
+            if await triggerTranscribe(bubble, panel: panel, appEl: appEl) { pressed.append(bubble) }
         }
         guard !pressed.isEmpty else { return }
 
@@ -70,10 +70,10 @@ enum VoiceTranscriber {
     /// 触发单条气泡的「转文字」。成功点到「转文字」返回 true，否则 false（自己发的/不支持/没等到）。
     /// 关键：在 0.6s 窗口内**持续等待**「转文字」项出现；不因"出现了一个没有转文字项的菜单"就取消跳过
     /// （那可能是上一条残留菜单或菜单还没填充好）。只有整个窗口都没等到才放弃。
-    private static func triggerTranscribe(_ bubble: AXUIElement, appEl: AXUIElement) async -> Bool {
+    private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
         guard actions(bubble).contains("AXShowMenu") else { return false }
         // 弹菜单前先确保无残留菜单，避免本条 AXShowMenu 命中旧菜单。
-        await waitMenuDismissed(appEl: appEl)
+        await waitMenuDismissed(panel: panel, appEl: appEl)
         AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
 
         // 0.6s 窗口内持续轮询（步进 25ms），等「转文字」项出现。
@@ -81,7 +81,7 @@ enum VoiceTranscriber {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.6 {
             if Task.isCancelled { return false }  // ESC 已取消：放弃本条触发
-            if let menu = findMenu(appEl), let it = transcribeItem(in: menu) {
+            if let menu = findMenu(panel: panel, appEl: appEl), let it = transcribeItem(in: menu) {
                 target = it
                 break
             }
@@ -90,16 +90,16 @@ enum VoiceTranscriber {
 
         guard let target else {
             // 整个窗口都没等到「转文字」：兜底关掉此刻任何遗留菜单，再放弃这条。
-            if let stray = findMenu(appEl) {
+            if let stray = findMenu(panel: panel, appEl: appEl) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
-                await waitMenuDismissed(appEl: appEl)
+                await waitMenuDismissed(panel: panel, appEl: appEl)
             }
             return false
         }
 
         AXUIElementPerformAction(target, "AXPress" as CFString)  // 选中即关菜单并开始转写（服务器异步转）
         // AXPress 后也等菜单收起（短超时），避免下一条 AXShowMenu 命中本条还没收起的旧菜单。
-        await waitMenuDismissed(appEl: appEl)
+        await waitMenuDismissed(panel: panel, appEl: appEl)
         return true
     }
 
@@ -111,11 +111,11 @@ enum VoiceTranscriber {
 
     /// 轮询直到全 app 内已无 AXMenu（菜单收起）或 ~0.35s 超时；步进 25ms。
     /// 只等菜单关闭，不等转写结果，整体仍是「快速点过去」的策略。
-    private static func waitMenuDismissed(appEl: AXUIElement) async {
+    private static func waitMenuDismissed(panel: AXUIElement, appEl: AXUIElement) async {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.35 {
             if Task.isCancelled { return }  // ESC 已取消：停止等待菜单收起
-            if findMenu(appEl) == nil { return }
+            if findMenu(panel: panel, appEl: appEl) == nil { return }
             try? await Task.sleep(nanoseconds: 25_000_000)
         }
     }
@@ -149,9 +149,12 @@ enum VoiceTranscriber {
         return out
     }
 
-    /// 找上下文菜单 AXMenu：普通深度优先遍历（诊断确认菜单在窗口深处、约 979 节点处命中）。
-    /// 不做剪枝——菜单的 AXChildren 路径会经过 AXList 等节点，剪枝会把通往菜单的路堵死。
-    private static func findMenu(_ appEl: AXUIElement) -> AXUIElement? {
+    /// 优先在右侧消息面板里找菜单（菜单就在消息表内，瞬时）；找不到再退回全树兜底（慢但稳）。
+    private static func findMenu(panel: AXUIElement, appEl: AXUIElement) -> AXUIElement? {
+        if let m = dfsMenu(panel) { return m }
+        return dfsMenu(appEl)
+    }
+    private static func dfsMenu(_ root: AXUIElement) -> AXUIElement? {
         var result: AXUIElement?
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
@@ -160,7 +163,7 @@ enum VoiceTranscriber {
             if WeChatAXProbe.role(el) == "AXMenu" { result = el; return }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
         }
-        walk(appEl, 0)
+        walk(root, 0)
         return result
     }
 
