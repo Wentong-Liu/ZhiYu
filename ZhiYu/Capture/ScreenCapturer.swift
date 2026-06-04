@@ -18,7 +18,12 @@ enum ScreenCapturer {
                                y: globalRect.minY - display.frame.minY,
                                width: globalRect.width, height: globalRect.height)
             cfg.sourceRect = local
-            let scale = NSScreen.screens.first?.backingScaleFactor ?? 2
+            // 用"被截屏所在 display"对应的 NSScreen 缩放，避免多屏混合 DPI 下分辨率错配。
+            let screenNumberKey = NSDeviceDescriptionKey("NSScreenNumber")
+            let matched = NSScreen.screens.first {
+                ($0.deviceDescription[screenNumberKey] as? NSNumber)?.uint32Value == display.displayID
+            }
+            let scale = matched?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
             cfg.width = max(1, Int(local.width * scale))
             cfg.height = max(1, Int(local.height * scale))
             cfg.showsCursor = false
