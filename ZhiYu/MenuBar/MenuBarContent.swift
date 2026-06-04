@@ -12,6 +12,10 @@ struct MenuBarContent: View {
                 AccessibilityAuthorizer.openSettings()
             }
         }
+        Button("知语设置…") {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "settings")
+        }
         Button("打开探针窗口") {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "probe")

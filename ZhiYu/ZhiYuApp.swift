@@ -13,5 +13,10 @@ struct ZhiYuApp: App {
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)   // 启动不自动弹窗，仅菜单点击时打开
+        Window("知语设置", id: "settings") {
+            SettingsView()
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
     }
 }
