@@ -27,7 +27,7 @@ final class CandidatePanelController: NSObject {
         model.candidates = []
         model.status = ""
         model.providerLabel = AppConfig.shared.providerLabel
-        let style = ReplyStyle.presets[min(AppConfig.shared.styleIndex, ReplyStyle.presets.count - 1)]
+        let style = AppConfig.shared.currentStyle()
         Task {
             do {
                 let provider = try await ProviderFactory.make()
