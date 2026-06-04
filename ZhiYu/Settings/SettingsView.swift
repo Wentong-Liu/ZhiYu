@@ -7,6 +7,7 @@ final class SettingsModel: ObservableObject {
     @Published var kind: ProviderKind { didSet { AppConfig.shared.providerKind = kind; syncForKind() } }
     @Published var model: String { didSet { AppConfig.shared.model = model } }
     @Published var styleIndex: Int { didSet { AppConfig.shared.styleIndex = styleIndex } }
+    @Published var customPrompt: String { didSet { AppConfig.shared.customPrompt = customPrompt } }
     @Published var apiKey: String = ""
     @Published var status = ""
     @Published var loggedIn = KeychainStore.loadChatGPTTokens() != nil
@@ -16,19 +17,22 @@ final class SettingsModel: ObservableObject {
         kind = AppConfig.shared.providerKind
         model = AppConfig.shared.model
         styleIndex = AppConfig.shared.styleIndex
+        customPrompt = ""
         switch AppConfig.shared.providerKind {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
         case .chatGPT: apiKey = ""
         }
+        customPrompt = AppConfig.shared.customPrompt
     }
 
     func syncForKind() {
         switch kind {
-        case .openAI: apiKey = KeychainStore.openAIKey(); model = "gpt-4o"
-        case .deepSeek: apiKey = KeychainStore.deepSeekKey(); model = "deepseek-v4-flash"
-        case .chatGPT: model = "gpt-5.5"
+        case .openAI: apiKey = KeychainStore.openAIKey()
+        case .deepSeek: apiKey = KeychainStore.deepSeekKey()
+        case .chatGPT: break
         }
+        model = kind.defaultModel
     }
     func saveKey() {
         let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,10 +162,36 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("模型与风格")
             HStack(spacing: 10) {
-                TextField("模型名", text: $vm.model).textFieldStyle(.roundedBorder).frame(maxWidth: .infinity)
+                Picker("", selection: $vm.model) {
+                    ForEach(vm.kind.modelOptions, id: \.id) { opt in
+                        Text(opt.label).tag(opt.id)
+                    }
+                }
+                .labelsHidden().tint(.white).frame(maxWidth: .infinity)
+
                 Picker("", selection: $vm.styleIndex) {
-                    ForEach(Array(vm.styles.enumerated()), id: \.offset) { i, s in Text(s.name).tag(i) }
-                }.labelsHidden().frame(width: 130).tint(.white)
+                    ForEach(Array(vm.styles.enumerated()), id: \.offset) { i, s in
+                        Text(s.name).tag(i)
+                    }
+                    Text("自定义").tag(vm.styles.count)
+                }
+                .labelsHidden().tint(.white).frame(width: 130)
+            }
+            if vm.styleIndex >= vm.styles.count {
+                TextEditor(text: $vm.customPrompt)
+                    .font(.callout)
+                    .frame(height: 84)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.06)))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.1)))
+                    .overlay(alignment: .topLeading) {
+                        if vm.customPrompt.isEmpty {
+                            Text("写给大模型的提示词，例如：用我一贯的简短、略带调侃的口吻回复，多用语气词。")
+                                .font(.callout).foregroundStyle(.tertiary)
+                                .padding(.horizontal, 13).padding(.vertical, 16).allowsHitTesting(false)
+                        }
+                    }
             }
         }
     }
