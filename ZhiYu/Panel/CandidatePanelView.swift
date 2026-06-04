@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import ZhiYuCore
 
 @MainActor
 final class CandidatePanelModel: ObservableObject {
@@ -71,19 +72,36 @@ struct CandidatePanelView: View {
     }
 
     private func card(index i: Int, text c: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let bubbles = BubbleSplitter.split(c)
+        return HStack(alignment: .top, spacing: 10) {
             Text("\(i + 1)")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 20, height: 20)
                 .background(Circle().fill(Color.white.opacity(0.15)))
-            Text(c)
-                .font(.body)
-                .foregroundStyle(.white.opacity(0.95))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .contentShape(Rectangle())
-                .onTapGesture { model.onFill(c) }
+            VStack(alignment: .leading, spacing: 5) {
+                if bubbles.count > 1 {
+                    ForEach(Array(bubbles.enumerated()), id: \.offset) { _, b in
+                        Text(b)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.95))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(.white.opacity(0.06)))
+                    }
+                } else {
+                    Text(c)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.95))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { model.onFill(c) }
             Button { model.onSend(c) } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 11, weight: .semibold))
