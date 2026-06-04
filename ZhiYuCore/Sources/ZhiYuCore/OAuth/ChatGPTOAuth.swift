@@ -6,8 +6,13 @@ public enum ChatGPTOAuth {
     public static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     public static let authorizeEndpoint = "https://auth.openai.com/oauth/authorize"
     public static let tokenEndpoint = "https://auth.openai.com/oauth/token"
-    public static let redirectURI = "http://localhost:1455/auth/callback"
+    /// OAuth 回调本地回环服务的端口/host（单一真相源，供 CodexLoginService 起 NWListener、拼回调 URL 复用）。
+    public static let callbackHost = "127.0.0.1"
+    public static let callbackPort: UInt16 = 1455
+    /// 授权服务器登记的 redirect_uri（值固定为 http://localhost:1455/auth/callback，端口复用 callbackPort）。
+    public static let redirectURI = "http://localhost:\(callbackPort)/auth/callback"
     public static let scope = "openid profile email offline_access"
+    /// 协议 originator（单一真相源，供授权 URL、Responses header、User-Agent 派生复用）。
     public static let originator = "openclaw"
 
     public static func authorizeURL(pkce: PKCE, state: String) -> URL {

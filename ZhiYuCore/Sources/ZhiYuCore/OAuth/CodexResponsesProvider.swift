@@ -10,7 +10,7 @@ public struct CodexResponsesProvider: LLMProvider {
     private let session: URLSession
 
     public init(accessToken: String, accountId: String, model: String,
-                userAgent: String = "openclaw (macOS)", session: URLSession = .shared) {
+                userAgent: String = "\(ChatGPTOAuth.originator) (macOS)", session: URLSession = .shared) {
         self.accessToken = accessToken
         self.accountId = accountId
         self.model = model
@@ -47,7 +47,7 @@ public struct CodexResponsesProvider: LLMProvider {
         req.httpMethod = "POST"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
-        req.setValue("openclaw", forHTTPHeaderField: "originator")
+        req.setValue(ChatGPTOAuth.originator, forHTTPHeaderField: "originator")
         req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         req.setValue("responses=experimental", forHTTPHeaderField: "OpenAI-Beta")
         req.setValue("text/event-stream", forHTTPHeaderField: "accept")

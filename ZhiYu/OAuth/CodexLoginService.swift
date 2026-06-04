@@ -2,12 +2,12 @@ import AppKit
 import Network
 import ZhiYuCore
 
-/// ChatGPT 登录：起 127.0.0.1:1455 回环服务接 OAuth 回调，开浏览器授权，换 token 存 Keychain；按需刷新。
+/// ChatGPT 登录：起 ChatGPTOAuth.callbackHost:callbackPort（127.0.0.1:1455）回环服务接 OAuth 回调，开浏览器授权，换 token 存 Keychain；按需刷新。
 @MainActor
 final class CodexLoginService {
     static let shared = CodexLoginService()
 
-    /// 登录超时（秒）：用户打开浏览器后若一直不完成授权，到点自动收尾，释放端口 1455。
+    /// 登录超时（秒）：用户打开浏览器后若一直不完成授权，到点自动收尾，释放端口 callbackPort(1455)。
     private static let loginTimeout: TimeInterval = 300
 
     private var listener: NWListener?
@@ -20,7 +20,7 @@ final class CodexLoginService {
         case serverFailed, stateMismatch, noCode, exchangeFailed(String), cancelled, timedOut
         var description: String {
             switch self {
-            case .serverFailed: return "本地回环服务启动失败（端口 1455 可能被占用）"
+            case .serverFailed: return "本地回环服务启动失败（端口 \(ChatGPTOAuth.callbackPort) 可能被占用）"
             case .stateMismatch: return "state 校验失败"
             case .noCode: return "回调里没有授权码"
             case .exchangeFailed(let m): return "换 token 失败：\(m)"
@@ -42,7 +42,7 @@ final class CodexLoginService {
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
-            let l = try NWListener(using: params, on: 1455)
+            let l = try NWListener(using: params, on: NWEndpoint.Port(rawValue: ChatGPTOAuth.callbackPort)!)
             l.newConnectionHandler = { [weak self] conn in
                 Task { @MainActor [weak self] in self?.handle(conn) }
             }
@@ -85,7 +85,7 @@ final class CodexLoginService {
     }
 
     private func onCallback(path: String) {
-        guard let comps = URLComponents(string: "http://localhost:1455\(path)"),
+        guard let comps = URLComponents(string: "http://\(ChatGPTOAuth.callbackHost):\(ChatGPTOAuth.callbackPort)\(path)"),
               comps.path == "/auth/callback" else { return }
         let items = comps.queryItems ?? []
         let code = items.first(where: { $0.name == "code" })?.value
