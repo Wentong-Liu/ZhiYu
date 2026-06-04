@@ -26,23 +26,25 @@ enum StickerSender {
         guard let emojiBtn = findButton(in: panelRoot, title: "表情") else { fail("未找到「表情」按钮"); return false }
         AXUIElementPerformAction(emojiBtn, "AXPress" as CFString)
 
-        // 2) 等 popover（只在 app 顶层浅查，避免 DFS 扎进左侧巨表导致误返回 nil）。
-        guard let popover = await poll(timeout: 1.6, { findPopoverShallow(appEl) ?? findRole("AXPopover", in: appEl) })
-        else { fail("表情面板(popover)未出现"); return false }
+        let t0 = ProcessInfo.processInfo.systemUptime
 
-        // 3) 进搜索：优先 AXPress 底部工具栏第一个 item(🔍)；不行则坐标点击其中心。
-        if (await poll(timeout: 0.6, { searchField(in: popover) })) == nil {
-            if let first = bottomToolbarFirstItem(in: popover) {
-                AXUIElementPerformAction(first, "AXPress" as CFString)
-                if (await poll(timeout: 0.5, { searchField(in: popover) })) == nil,
-                   let f = WeChatAXProbe.frame(of: first) {
-                    clickAt(CGPoint(x: f.midX, y: f.midY))
-                }
+        // 2) 等 popover（app 顶层浅查，避免 DFS 扎进左侧巨表导致误返回 nil/变慢）。
+        guard let popover = await poll(timeout: 2.0, { findPopoverShallow(appEl) ?? findRole("AXPopover", in: appEl) })
+        else { fail("表情面板(popover)未出现"); return false }
+        NSLog("[StickerSender] popover 用时 %.0fms", (ProcessInfo.processInfo.systemUptime - t0) * 1000)
+
+        // 3) 进搜索：🔍 无 AX 动作（只是无标签 AXImage），只能坐标点。
+        //    搜索框已在(面板记住搜索态)则跳过；否则等面板布局稳定后直接坐标点 🔍——不再做无谓的 AXPress + 轮询等待。
+        if searchField(in: popover) == nil {
+            try? await Task.sleep(nanoseconds: 80_000_000)  // 等面板布局稳定再读 🔍 frame
+            if let first = bottomToolbarFirstItem(in: popover), let f = WeChatAXProbe.frame(of: first) {
+                clickAt(CGPoint(x: f.midX, y: f.midY))
             } else {
                 NSLog("[StickerSender] 警告：未定位到底部工具栏🔍项")
             }
         }
         guard let field = await poll(timeout: 1.6, { searchField(in: popover) }) else { fail("未进入表情搜索框"); return false }
+        NSLog("[StickerSender] 进入搜索 用时 %.0fms", (ProcessInfo.processInfo.systemUptime - t0) * 1000)
 
         // 4) 写关键词 + 回车。
         AXUIElementSetAttributeValue(field, "AXValue" as CFString, keyword as CFString)
@@ -157,12 +159,12 @@ enum StickerSender {
         return AXUIElementIsAttributeSettable(el, attr as CFString, &b) == .success && b.boolValue
     }
 
-    /// 反复调用 probe 直到返回非 nil 或超时（步进 120ms）。
+    /// 反复调用 probe 直到返回非 nil 或超时（步进 60ms，更跟手）。
     private static func poll<T>(timeout: TimeInterval, _ probe: () -> T?) async -> T? {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < timeout {
             if let v = probe() { return v }
-            try? await Task.sleep(nanoseconds: 120_000_000)
+            try? await Task.sleep(nanoseconds: 60_000_000)
         }
         return probe()
     }
