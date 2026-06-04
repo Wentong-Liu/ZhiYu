@@ -23,4 +23,21 @@ enum Inserter {
             completion(true)
         }
     }
+
+    /// 把多条气泡逐条单独发出（每条之间留间隔，给微信处理时间）。
+    static func sendSequential(_ parts: [String]) {
+        sendNext(parts, 0)
+    }
+
+    private static func sendNext(_ parts: [String], _ i: Int) {
+        guard i < parts.count else { return }
+        let text = parts[i]
+        guard !text.isEmpty else { sendNext(parts, i + 1); return }
+        fillAndSend(text) { _ in
+            // 上一条发出后留 0.4s 再发下一条（叠加 fillAndSend 内部时序，约 0.8s/条）。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                sendNext(parts, i + 1)
+            }
+        }
+    }
 }

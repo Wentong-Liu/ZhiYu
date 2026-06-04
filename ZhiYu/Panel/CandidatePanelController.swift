@@ -45,7 +45,10 @@ final class CandidatePanelController: NSObject {
 
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
-        model.onSend = { [weak self] t in Inserter.fillAndSend(t) { _ in }; self?.dismiss() }
+        model.onSend = { [weak self] t in
+            Inserter.sendSequential(BubbleSplitter.split(t))
+            self?.dismiss()
+        }
         model.onDismiss = { [weak self] in self?.dismiss() }
 
         let hosting = NSHostingView(rootView: CandidatePanelView(model: model))
