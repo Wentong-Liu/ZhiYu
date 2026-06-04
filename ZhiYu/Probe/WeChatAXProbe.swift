@@ -42,7 +42,14 @@ enum WeChatAXProbe {
         let speaker: Speaker
         let name: String   // 发言人名（other 才有意义；me/separator 为空）
         let text: String   // 正文
+        /// 图片/表情消息的气泡截图区域（AX 全局左上原点坐标）；普通文本为 nil。
+        let imageFrame: CGRect?
         var isMe: Bool { speaker == .me }
+
+        /// 复制并替换 imageFrame（行级填充用：parseMessage 先产出 imageFrame=nil 的副本）。
+        func with(imageFrame: CGRect?) -> Message {
+            Message(speaker: speaker, name: name, text: text, imageFrame: imageFrame)
+        }
     }
 
     /// 探针读取结果（本地轻量类型，不依赖 ZhiYuCore）。
@@ -275,19 +282,52 @@ enum WeChatAXProbe {
             let r = role($0)
             return r == roleRow || r == roleTableRow
         }
-        var rawValues: [String] = []
+        // 行路径：每行取首个非空文本，同时在行子树检测图片/表情的 frame。
+        var parsed: [Message] = []
         for row in rows {
-            if let value = firstNonEmptyValue(in: row, depth: 0) { rawValues.append(value) }
+            guard let value = firstNonEmptyValue(in: row, depth: 0) else { continue }
+            var msg = parseMessage(value)
+            // 表情包：行内有 AXImage，取其精确 frame。
+            if value.contains("发送了一个表情") {
+                msg = msg.with(imageFrame: findFirstImageFrame(row, depth: 0))
+            } else if value.contains("发送了一个图片") {
+                // 图片：通常无子 AXImage，截承载该文本的叶子(或整行)的 frame。
+                let f = firstNonEmptyValueFrame(in: row, depth: 0) ?? frame(of: row)
+                msg = msg.with(imageFrame: f)
+            }
+            parsed.append(msg)
         }
         var usedFallback = false
-        if rawValues.isEmpty {
+        if parsed.isEmpty {
             usedFallback = true
+            var rawValues: [String] = []
             var visited = 0
             collectLeafValues(table, depth: 0, visited: &visited, into: &rawValues)
+            // 兜底路径拿不到行元素，imageFrame 一律为 nil（仅文本上下文）。
+            parsed = rawValues.map { parseMessage($0) }
         }
-        diagnostics.append("消息表: 子节点=\(allChildren.count) 行=\(rows.count) 取值=\(rawValues.count)\(usedFallback ? "(兜底)" : "")")
-        let parsed = rawValues.map { parseMessage($0) }
+        diagnostics.append("消息表: 子节点=\(allChildren.count) 行=\(rows.count) 取值=\(parsed.count)\(usedFallback ? "(兜底)" : "")")
         return parsed.count > maxMessages ? Array(parsed.suffix(maxMessages)) : parsed
+    }
+
+    /// 在子树中查找第一个 role==AXImage 的节点的 frame（表情包气泡精确区域）。
+    private static func findFirstImageFrame(_ el: AXUIElement, depth: Int) -> CGRect? {
+        guard depth < 12 else { return nil }
+        if role(el) == "AXImage", let f = frame(of: el) { return f }
+        for child in children(el) {
+            if let f = findFirstImageFrame(child, depth: depth + 1) { return f }
+        }
+        return nil
+    }
+
+    /// 行内下钻到第一个含非空文本的叶子，返回其 frame（图片消息无子 AXImage 时，截该文本叶子的区域）。
+    private static func firstNonEmptyValueFrame(in el: AXUIElement, depth: Int) -> CGRect? {
+        guard depth < 12 else { return nil }
+        if bestText(el) != nil, let f = frame(of: el) { return f }
+        for child in children(el) {
+            if let f = firstNonEmptyValueFrame(in: child, depth: depth + 1) { return f }
+        }
+        return nil
     }
 
     /// 表子树内按文档顺序收集叶子节点的非空 AXValue（跳过 AXColumn/滚动条避免与行重复）。
@@ -332,30 +372,30 @@ enum WeChatAXProbe {
     static func parseMessage(_ raw: String) -> Message {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty {
-            return Message(speaker: .separator, name: "", text: raw)
+            return Message(speaker: .separator, name: "", text: raw, imageFrame: nil)
         }
 
         // 纯时间 / 日期分隔行：02:33 / 03:03 / 昨天 20:38 / 上午 9:41 等。
         if isTimeSeparator(value) {
-            return Message(speaker: .separator, name: "", text: value)
+            return Message(speaker: .separator, name: "", text: value, imageFrame: nil)
         }
 
         // 我说: / 我:（半/全角冒号）
         for prefix in ["我说:", "我说：", "我:", "我："] {
             if value.hasPrefix(prefix) {
                 let body = String(value.dropFirst(prefix.count))
-                return Message(speaker: .me, name: "", text: body)
+                return Message(speaker: .me, name: "", text: body, imageFrame: nil)
             }
         }
 
         // 对方：^(.+?)说[:：]  优先，其次 ^(.+?)[:：]
         if let (name, body) = matchSpeaker(value, pattern: "^(.+?)说[:：](.*)$")
             ?? matchSpeaker(value, pattern: "^(.+?)[:：](.*)$") {
-            return Message(speaker: .other, name: name, text: body)
+            return Message(speaker: .other, name: name, text: body, imageFrame: nil)
         }
 
         // 无分隔符：无法解析说话人，按 other 整条作为正文，name 留空。
-        return Message(speaker: .other, name: "", text: value)
+        return Message(speaker: .other, name: "", text: value, imageFrame: nil)
     }
 
     /// 用正则取捕获组 1=name、组 2=body（已 trim）。
@@ -425,45 +465,6 @@ enum WeChatAXProbe {
     }
 
     static func role(_ el: AXUIElement) -> String { copyString(el, "AXRole") ?? "" }
-
-    // MARK: - 临时诊断（排查"图片/表情"消息的 AX 结构与 frame，确认后删）
-
-    /// 导出消息表最后 12 行：每个节点的 role + frame + AXValue/AXTitle/AXDescription。
-    static func dumpMessageRows() -> [String] {
-        guard AXIsProcessTrusted() else { return ["未授予辅助功能权限"] }
-        guard let app = findWeChatApp() else { return ["未找到微信"] }
-        let appEl = AXUIElementCreateApplication(app.processIdentifier)
-        _ = wakeAccessibility(appEl)
-        guard let window = copyElement(appEl, "AXFocusedWindow") ?? copyElement(appEl, "AXMainWindow") else {
-            return ["拿不到窗口"]
-        }
-        var diag: [String] = []
-        guard let panel = locateRightPanel(window: window, diagnostics: &diag) else {
-            return diag + ["没定位到右侧面板"]
-        }
-        guard let table = locateMessageTable(in: panel) else {
-            return diag + ["没定位到消息表"]
-        }
-        let rows = children(table).filter { let r = role($0); return r == roleRow || r == roleTableRow }
-        var out: [String] = ["消息行数: \(rows.count)（导出最后 12 行）"]
-        for (i, row) in Array(rows.suffix(12)).enumerated() {
-            out.append("—— row \(i) ——")
-            dumpNodeAttrs(row, depth: 0, into: &out)
-        }
-        return out
-    }
-
-    private static func dumpNodeAttrs(_ el: AXUIElement, depth: Int, into out: inout [String]) {
-        guard depth < 8 else { return }
-        let pad = String(repeating: "  ", count: depth)
-        func attr(_ a: String) -> String {
-            let s = copyString(el, a) ?? ""
-            return s.isEmpty ? "" : String(s.prefix(60)).replacingOccurrences(of: "\n", with: "⏎")
-        }
-        let f = frame(of: el).map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height)))" } ?? "-"
-        out.append("\(pad)\(role(el)) \(f) | V=「\(attr("AXValue"))」 T=「\(attr("AXTitle"))」 D=「\(attr("AXDescription"))」")
-        for c in children(el) { dumpNodeAttrs(c, depth: depth + 1, into: &out) }
-    }
 
     static func frame(of el: AXUIElement) -> CGRect? {
         var posValue: CFTypeRef?

@@ -21,7 +21,8 @@ final class CandidatePanelController: NSObject {
               let frame = snapshot.composerFrame else {
             NSSound.beep(); return
         }
-        let context = snapshot.context
+        let baseContext = snapshot.context
+        let imageFrames = snapshot.imageFrames
         showPanel(anchorAXFrame: frame)
         model.isLoading = true
         model.candidates = []
@@ -30,6 +31,9 @@ final class CandidatePanelController: NSObject {
         let style = AppConfig.shared.currentStyle()
         Task {
             do {
+                // 异步截取图片/表情气泡，附到上下文后再生成。无图时 urls 为空、上下文仅文本。
+                let urls = await WeChatReader.captureImages(imageFrames)
+                let context = WeChatReader.context(baseContext, withImages: urls)
                 let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
