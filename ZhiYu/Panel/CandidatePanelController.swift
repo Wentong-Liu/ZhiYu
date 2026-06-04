@@ -26,6 +26,7 @@ final class CandidatePanelController: NSObject {
         model.isLoading = true
         model.candidates = []
         model.status = ""
+        model.providerLabel = AppConfig.shared.providerLabel
         let style = ReplyStyle.presets[min(AppConfig.shared.styleIndex, ReplyStyle.presets.count - 1)]
         Task {
             do {
