@@ -2,9 +2,19 @@ import SwiftUI
 import Combine
 import ZhiYuCore
 
+/// 设置里把 OpenAI(API Key) 与 ChatGPT 登录归为同一"家族"(OpenAI)，DeepSeek 单独一家族。
+enum ProviderFamily: String, CaseIterable, Identifiable {
+    case openAI = "OpenAI"
+    case deepSeek = "DeepSeek"
+    var id: String { rawValue }
+}
+
 @MainActor
 final class SettingsModel: ObservableObject {
-    @Published var kind: ProviderKind { didSet { AppConfig.shared.providerKind = kind; syncForKind() } }
+    /// 当前启用的家族（OpenAI / DeepSeek）。
+    @Published var family: ProviderFamily { didSet { applyKind() } }
+    /// OpenAI 家族下用 ChatGPT 登录(true) 还是 API Key(false)。
+    @Published var openAIUsesChatGPT: Bool { didSet { if family == .openAI { applyKind() } } }
     @Published var model: String { didSet { AppConfig.shared.model = model } }
     @Published var styleIndex: Int { didSet { AppConfig.shared.styleIndex = styleIndex } }
     @Published var customPrompt: String { didSet { AppConfig.shared.customPrompt = customPrompt } }
@@ -13,17 +23,23 @@ final class SettingsModel: ObservableObject {
     @Published var loggedIn = KeychainStore.loadChatGPTTokens() != nil
     let styles = ReplyStyle.presets
 
+    /// 家族 + OpenAI 子选择 -> 实际 ProviderKind。
+    var currentKind: ProviderKind {
+        switch family {
+        case .deepSeek: return .deepSeek
+        case .openAI: return openAIUsesChatGPT ? .chatGPT : .openAI
+        }
+    }
+
     init() {
-        kind = AppConfig.shared.providerKind
-        // 校验：持久化的 model 必须属于当前 providerKind.modelOptions，
-        // 否则 Picker 会空选/无高亮，且会把不属于该 Provider 的 model id 发给 API。
-        let validModels = AppConfig.shared.providerKind.modelOptions.map(\.id)
-        model = validModels.contains(AppConfig.shared.model)
-            ? AppConfig.shared.model
-            : AppConfig.shared.providerKind.defaultModel
+        let k = AppConfig.shared.providerKind
+        family = (k == .deepSeek) ? .deepSeek : .openAI
+        openAIUsesChatGPT = (k == .chatGPT)
+        let valid = k.modelOptions.map(\.id)
+        model = valid.contains(AppConfig.shared.model) ? AppConfig.shared.model : k.defaultModel
         styleIndex = AppConfig.shared.styleIndex
         customPrompt = ""
-        switch AppConfig.shared.providerKind {
+        switch k {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
         case .chatGPT: apiKey = ""
@@ -31,17 +47,22 @@ final class SettingsModel: ObservableObject {
         customPrompt = AppConfig.shared.customPrompt
     }
 
-    func syncForKind() {
-        switch kind {
+    /// 选择/切换后把 effective kind 写进 AppConfig，并复位 model/凭证显示。
+    private func applyKind() {
+        let k = currentKind
+        AppConfig.shared.providerKind = k
+        model = k.defaultModel
+        switch k {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
-        case .chatGPT: break
+        case .chatGPT: apiKey = ""
         }
-        model = kind.defaultModel
+        loggedIn = KeychainStore.loadChatGPTTokens() != nil
     }
+
     func saveKey() {
         let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch kind {
+        switch currentKind {
         case .openAI: KeychainStore.setOpenAIKey(k); status = "已保存 OpenAI Key"
         case .deepSeek: KeychainStore.setDeepSeekKey(k); status = "已保存 DeepSeek Key"
         case .chatGPT: break
@@ -85,7 +106,6 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 title
                 providerSection
-                credentialSection
                 modelStyleSection
                 triggerSection
                 if !vm.status.isEmpty {
@@ -95,7 +115,7 @@ struct SettingsView: View {
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 460, height: 540)
+        .frame(width: 460, height: 560)
         .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
         .environment(\.colorScheme, .dark)
     }
@@ -115,60 +135,111 @@ struct SettingsView: View {
         Text(t).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
     }
 
+    // MARK: 模型来源 —— 纵向列表 + 单选
+
     private var providerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("模型来源")
-            HStack(spacing: 4) {
-                ForEach(ProviderKind.allCases) { k in
-                    Button { vm.kind = k } label: {
-                        Text(k.rawValue)
-                            .font(.callout)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .foregroundStyle(vm.kind == k ? .white : .secondary)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(.white.opacity(vm.kind == k ? 0.16 : 0))
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+            VStack(spacing: 8) {
+                openAIRow
+                deepSeekRow
             }
-            .padding(3)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.white.opacity(0.05)))
         }
     }
 
-    @ViewBuilder private var credentialSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if vm.kind == .chatGPT {
-                sectionHeader("ChatGPT 账号")
+    private var openAIRow: some View {
+        providerCard(selected: vm.family == .openAI, title: "OpenAI",
+                     subtitle: "API Key 或 ChatGPT 订阅登录",
+                     onSelect: { vm.family = .openAI }) {
+            monoSegment(options: [("key", "API Key"), ("chatgpt", "ChatGPT 登录")],
+                        selectedID: vm.openAIUsesChatGPT ? "chatgpt" : "key") { id in
+                vm.openAIUsesChatGPT = (id == "chatgpt")
+            }
+            if vm.openAIUsesChatGPT {
                 HStack(spacing: 10) {
                     Label(vm.loggedIn ? "已登录" : "未登录",
                           systemImage: vm.loggedIn ? "checkmark.circle.fill" : "person.crop.circle")
-                        .foregroundStyle(vm.loggedIn ? .white.opacity(0.9) : .secondary)
+                        .font(.callout).foregroundStyle(vm.loggedIn ? .white.opacity(0.9) : .secondary)
                     Spacer()
                     Button(vm.loggedIn ? "重新登录" : "用 ChatGPT 登录") { vm.login() }
                         .buttonStyle(MonoButton(filled: true))
                     if vm.loggedIn { Button("退出") { vm.logout() }.buttonStyle(MonoButton()) }
                 }
             } else {
-                sectionHeader("API Key")
                 HStack(spacing: 10) {
-                    SecureField("粘贴你的 API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                    SecureField("OpenAI API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
                     Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
                 }
             }
         }
     }
 
+    private var deepSeekRow: some View {
+        providerCard(selected: vm.family == .deepSeek, title: "DeepSeek",
+                     subtitle: "API Key",
+                     onSelect: { vm.family = .deepSeek }) {
+            HStack(spacing: 10) {
+                SecureField("DeepSeek API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func providerCard<Content: View>(selected: Bool, title: String, subtitle: String,
+                                             onSelect: @escaping () -> Void,
+                                             @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 11) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(selected ? .white.opacity(0.95) : .white.opacity(0.35))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.body.weight(.medium)).foregroundStyle(.white.opacity(0.95))
+                    Text(subtitle).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selected { Text("当前启用").font(.caption2).foregroundStyle(.white.opacity(0.55)) }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onSelect)
+            if selected { content() }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.white.opacity(selected ? 0.07 : 0.025)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(.white.opacity(selected ? 0.18 : 0.06), lineWidth: 1))
+        .animation(.easeOut(duration: 0.16), value: selected)
+    }
+
+    private func monoSegment(options: [(id: String, label: String)], selectedID: String,
+                             onSelect: @escaping (String) -> Void) -> some View {
+        HStack(spacing: 4) {
+            ForEach(options, id: \.id) { o in
+                Button { onSelect(o.id) } label: {
+                    Text(o.label).font(.caption)
+                        .frame(maxWidth: .infinity).padding(.vertical, 5)
+                        .foregroundStyle(selectedID == o.id ? .white : .secondary)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(.white.opacity(selectedID == o.id ? 0.16 : 0)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.05)))
+    }
+
+    // MARK: 模型与风格
+
     private var modelStyleSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("模型与风格")
             HStack(spacing: 10) {
                 Picker("", selection: $vm.model) {
-                    ForEach(vm.kind.modelOptions, id: \.id) { opt in
+                    ForEach(vm.currentKind.modelOptions, id: \.id) { opt in
                         Text(opt.label).tag(opt.id)
                     }
                 }
