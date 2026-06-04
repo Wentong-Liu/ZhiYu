@@ -6,6 +6,7 @@ import ZhiYuCore
 enum KeychainStore {
     static let service = "com.liuwentong.ZhiYu"
     static let openAIKeyAccount = "openai.apiKey"
+    static let deepSeekKeyAccount = "deepseek.apiKey"
     static let chatGPTTokensAccount = "chatgpt.oauthTokens"
 
     static func set(_ value: String, account: String) {
@@ -37,6 +38,9 @@ enum KeychainStore {
 
     static func openAIKey() -> String { get(account: openAIKeyAccount) ?? "" }
     static func setOpenAIKey(_ v: String) { set(v, account: openAIKeyAccount) }
+
+    static func deepSeekKey() -> String { get(account: deepSeekKeyAccount) ?? "" }
+    static func setDeepSeekKey(_ v: String) { set(v, account: deepSeekKeyAccount) }
 
     static func saveChatGPTTokens(_ tokens: ZhiYuCore.OAuthTokens) {
         guard let data = try? JSONEncoder().encode(tokens) else { return }

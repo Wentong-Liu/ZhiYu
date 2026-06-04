@@ -2,38 +2,71 @@ import SwiftUI
 import Combine
 import ZhiYuCore
 
+enum ProviderKind: String, CaseIterable, Identifiable {
+    case openAI = "OpenAI"
+    case deepSeek = "DeepSeek"
+    case chatGPT = "ChatGPT 登录"
+    var id: String { rawValue }
+}
+
 @MainActor
 final class GenerateViewModel: ObservableObject {
+    @Published var kind: ProviderKind = .openAI
     @Published var apiKey: String = KeychainStore.openAIKey()
     @Published var model: String = "gpt-4o"
     @Published var styleIndex: Int = 0
     @Published var status: String = ""
     @Published var candidates: [String] = []
     @Published var isLoading = false
+    @Published var loggedIn: Bool = KeychainStore.loadChatGPTTokens() != nil
 
     private let cache = CandidateCache()
     let styles = ReplyStyle.presets
 
+    /// 切换 Provider 时调整默认 key/model。
+    func onKindChange() {
+        switch kind {
+        case .openAI:  apiKey = KeychainStore.openAIKey();  if model.isEmpty { model = "gpt-4o" }
+        case .deepSeek: apiKey = KeychainStore.deepSeekKey(); model = "deepseek-v4-flash"
+        case .chatGPT: model = "gpt-5.5"
+        }
+    }
+
     func saveKey() {
-        KeychainStore.setOpenAIKey(apiKey.trimmingCharacters(in: .whitespacesAndNewlines))
-        status = "已保存 API Key 到 Keychain"
+        let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch kind {
+        case .openAI:  KeychainStore.setOpenAIKey(k);  status = "已保存 OpenAI Key"
+        case .deepSeek: KeychainStore.setDeepSeekKey(k); status = "已保存 DeepSeek Key"
+        case .chatGPT: break
+        }
+    }
+
+    func loginChatGPT() {
+        status = "正在打开浏览器登录 ChatGPT…"
+        CodexLoginService.shared.login { result in
+            switch result {
+            case .success: self.loggedIn = true; self.status = "ChatGPT 登录成功"
+            case .failure(let e): self.status = "登录失败：\(e)"
+            }
+        }
+    }
+
+    func logoutChatGPT() {
+        KeychainStore.clearChatGPTTokens(); loggedIn = false; status = "已退出 ChatGPT 登录"
     }
 
     func generate() {
-        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { status = "请先填写并保存 API Key"; return }
         guard let context = WeChatReader.readCurrentContext(), !context.messages.isEmpty else {
             status = "读不到微信对话（先切到某个会话，且已授权辅助功能）"; return
         }
-        let provider = OpenAICompatibleProvider(config: .openAI(model: model), apiKey: key)
-        let generator = ReplyGenerator(provider: provider, cache: cache, candidateCount: 3)
         let style = styles[styleIndex]
-        isLoading = true
+        isLoading = true; candidates = []
         status = "生成中…（联系人：\(context.contactName)，\(context.messages.count) 条上下文）"
-        candidates = []
         Task {
             do {
-                let result = try await generator.generate(context: context, style: style)
+                let provider = try await makeProvider()
+                let gen = ReplyGenerator(provider: provider, cache: cache, candidateCount: 3)
+                let result = try await gen.generate(context: context, style: style)
                 self.candidates = result
                 self.status = "完成，\(result.count) 条候选"
             } catch {
@@ -43,14 +76,29 @@ final class GenerateViewModel: ObservableObject {
         }
     }
 
-    func fill(_ text: String) {
-        Inserter.fill(text)
-        status = "已填入：\(text)"
+    private func makeProvider() async throws -> any LLMProvider {
+        switch kind {
+        case .openAI:
+            let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
+            return OpenAICompatibleProvider(config: .openAI(model: model), apiKey: k)
+        case .deepSeek:
+            let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
+            return OpenAICompatibleProvider(config: .deepSeek(model: model), apiKey: k)
+        case .chatGPT:
+            guard let tokens = await CodexLoginService.shared.validTokens() else {
+                throw ProviderError.missingAPIKey
+            }
+            return CodexResponsesProvider(accessToken: tokens.accessToken,
+                                          accountId: tokens.accountId, model: model)
+        }
     }
 
+    func fill(_ text: String) { Inserter.fill(text); status = "已填入" }
     func send(_ text: String) {
         Inserter.fillAndSend(text) { ok in
-            self.status = ok ? "已发送：\(text)" : "未发送（请确认微信在前台且输入框聚焦）"
+            self.status = ok ? "已发送" : "未发送（确认微信在前台且输入框聚焦）"
         }
     }
 }
@@ -61,19 +109,31 @@ struct GeneratePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("生成候选回复").font(.headline)
-            HStack {
-                SecureField("OpenAI API Key", text: $vm.apiKey)
-                Button("保存 Key") { vm.saveKey() }
+            Picker("Provider", selection: $vm.kind) {
+                ForEach(ProviderKind.allCases) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .onChange(of: vm.kind) { _, _ in vm.onKindChange() }
+
+            if vm.kind == .chatGPT {
+                HStack {
+                    Text(vm.loggedIn ? "已登录 ChatGPT ✓" : "未登录")
+                    Button(vm.loggedIn ? "重新登录" : "用 ChatGPT 登录") { vm.loginChatGPT() }
+                    if vm.loggedIn { Button("退出登录") { vm.logoutChatGPT() } }
+                }
+            } else {
+                HStack {
+                    SecureField("API Key", text: $vm.apiKey)
+                    Button("保存 Key") { vm.saveKey() }
+                }
+            }
+
             HStack {
                 TextField("模型", text: $vm.model).frame(width: 160)
                 Picker("风格", selection: $vm.styleIndex) {
-                    ForEach(Array(vm.styles.enumerated()), id: \.offset) { i, s in
-                        Text(s.name).tag(i)
-                    }
+                    ForEach(Array(vm.styles.enumerated()), id: \.offset) { i, s in Text(s.name).tag(i) }
                 }.frame(width: 160)
-                Button(vm.isLoading ? "生成中…" : "生成候选") { vm.generate() }
-                    .disabled(vm.isLoading)
+                Button(vm.isLoading ? "生成中…" : "生成候选") { vm.generate() }.disabled(vm.isLoading)
             }
             if !vm.status.isEmpty { Text(vm.status).font(.caption).foregroundStyle(.secondary) }
             ForEach(Array(vm.candidates.enumerated()), id: \.offset) { _, c in
@@ -82,9 +142,7 @@ struct GeneratePanel: View {
                     Button("填入") { vm.fill(c) }
                     Button("发送") { vm.send(c) }
                 }
-                .padding(6)
-                .background(Color.gray.opacity(0.12))
-                .cornerRadius(6)
+                .padding(6).background(Color.gray.opacity(0.12)).cornerRadius(6)
             }
         }
     }
