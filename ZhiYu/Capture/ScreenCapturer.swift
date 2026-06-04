@@ -32,6 +32,8 @@ enum ScreenCapturer {
             guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
             return "data:image/png;base64," + png.base64EncodedString()
         } catch {
+            // 截屏失败：记日志便于诊断（权限/display 变化等），契约不变——仍返回 nil。
+            NSLog("[ZhiYu] 截屏失败 rect=%@ error=%@", NSStringFromRect(globalRect), String(describing: error))
             return nil
         }
     }

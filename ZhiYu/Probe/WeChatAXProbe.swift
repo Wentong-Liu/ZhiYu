@@ -421,6 +421,31 @@ enum WeChatAXProbe {
 
     // MARK: - 说话人 / 正文解析
 
+    /// 预编译正则（固定模式只编译一次，避免每条消息重复 NSRegularExpression 构造）。
+    /// 行为不变：模式与原内联字面量逐字一致；DEBUG 下编译失败 assert 暴露，Release 下回退 nil（与原 try? 失败同义）。
+    private enum SpeakerRegex {
+        /// "^(.+?)说[:：](.*)$"：优先匹配 "X说:" 形式，捕获组 1=name、组 2=body。
+        static let saidPattern = "^(.+?)说[:：](.*)$"
+        /// "^(.+?)[:：](.*)$"：兜底匹配 "X:" 形式。
+        static let colonPattern = "^(.+?)[:：](.*)$"
+        /// 纯时间 / 日期分隔行模式。
+        static let timeSeparatorPattern = "^(昨天|前天|今天|上午|下午|凌晨|早上|中午|晚上|星期[一二三四五六日天]|周[一二三四五六日天]|[0-9]{1,4}[年/月-]|[\\s])*[0-9]{1,2}[:：][0-9]{2}$"
+
+        static let said = compile(saidPattern, options: [.dotMatchesLineSeparators])
+        static let colon = compile(colonPattern, options: [.dotMatchesLineSeparators])
+        static let timeSeparator = compile(timeSeparatorPattern, options: [])
+
+        /// 一次性编译；DEBUG 下失败 assert（模式写错能立刻发现），Release 下返回 nil（与原 try? 同义，匹配回退到不命中）。
+        private static func compile(_ pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression? {
+            do {
+                return try NSRegularExpression(pattern: pattern, options: options)
+            } catch {
+                assertionFailure("预编译正则失败 pattern=\(pattern) error=\(error)")
+                return nil
+            }
+        }
+    }
+
     /// 解析一条消息 value：
     /// - 以 "我说:" 或 "我:" 开头 -> me，正文=分隔符之后。
     /// - 否则匹配 "^(.+?)说[:：]" 或 "^(.+?)[:：]" -> other，name=捕获，正文=分隔符之后。
@@ -446,8 +471,8 @@ enum WeChatAXProbe {
         }
 
         // 对方：^(.+?)说[:：]  优先，其次 ^(.+?)[:：]
-        if let (name, body) = matchSpeaker(value, pattern: "^(.+?)说[:：](.*)$")
-            ?? matchSpeaker(value, pattern: "^(.+?)[:：](.*)$") {
+        if let (name, body) = matchSpeaker(value, regex: SpeakerRegex.said)
+            ?? matchSpeaker(value, regex: SpeakerRegex.colon) {
             return Message(speaker: .other, name: name, text: body, imageFrame: nil)
         }
 
@@ -455,11 +480,9 @@ enum WeChatAXProbe {
         return Message(speaker: .other, name: "", text: value, imageFrame: nil)
     }
 
-    /// 用正则取捕获组 1=name、组 2=body（已 trim）。
-    private static func matchSpeaker(_ value: String, pattern: String) -> (name: String, body: String)? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
-            return nil
-        }
+    /// 用预编译正则取捕获组 1=name、组 2=body（已 trim）。regex 为 nil（极端：编译失败）时回退不命中。
+    private static func matchSpeaker(_ value: String, regex: NSRegularExpression?) -> (name: String, body: String)? {
+        guard let regex else { return nil }
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
         guard let m = regex.firstMatch(in: value, options: [], range: range),
               m.numberOfRanges >= 3,
@@ -473,12 +496,9 @@ enum WeChatAXProbe {
 
     /// 判断纯时间 / 日期分隔行（如 "02:33" / "03:03" / "昨天 20:38" / "上午 9:41" / "星期三 下午 3:20"）。
     private static func isTimeSeparator(_ value: String) -> Bool {
-        let pattern = "^(昨天|前天|今天|上午|下午|凌晨|早上|中午|晚上|星期[一二三四五六日天]|周[一二三四五六日天]|[0-9]{1,4}[年/月-]|[\\s])*[0-9]{1,2}[:：][0-9]{2}$"
-        if let regex = try? NSRegularExpression(pattern: pattern) {
-            let range = NSRange(value.startIndex..<value.endIndex, in: value)
-            if regex.firstMatch(in: value, options: [], range: range) != nil { return true }
-        }
-        return false
+        guard let regex = SpeakerRegex.timeSeparator else { return false }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return regex.firstMatch(in: value, options: [], range: range) != nil
     }
 
     // MARK: - AX 辅助（供本类型与 InserterProbe 复用）

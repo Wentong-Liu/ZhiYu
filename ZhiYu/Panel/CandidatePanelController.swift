@@ -98,7 +98,9 @@ final class CandidatePanelController: NSObject {
             } catch {
                 guard generation == self.presentGeneration else { return }  // 陈旧任务：新 present 已接管，不写、不动 isBusy
                 self.model.isLoading = false
-                self.model.status = "失败：\(error)"
+                // UI 文案：对网络/鉴权/解析做简洁中文映射；完整 error 仅 NSLog 便于诊断（控制流不变）。
+                NSLog("[ZhiYu] 生成失败 error=%@", String(describing: error))
+                self.model.status = Self.userFacingMessage(for: error)
                 self.relayout()
                 self.isBusy = false
             }
@@ -162,7 +164,10 @@ final class CandidatePanelController: NSObject {
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: ReplyGenerator.defaultCandidateCount, modelTag: AppConfig.shared.modelTag)
                 _ = try await gen.generate(context: ctx, style: style)
                 self.lastPrewarmSig[ctx.contactName] = sig   // 成功后才记指纹；失败留待重试
-            } catch { }
+            } catch {
+                // 后台预暖失败：吞掉不打扰用户（不弹面板），但记日志便于诊断（含联系人+错误）。
+                NSLog("[ZhiYu] prewarm 失败 contact=%@ error=%@", ctx.contactName, String(describing: error))
+            }
         }
     }
 
@@ -275,5 +280,37 @@ final class CandidatePanelController: NSObject {
         // 再按各屏的全局 frame（含 x/y 偏移）判断归属——主副屏一致，无须近似。
         let appKitPoint = CGPoint(x: p.x, y: Self.primaryScreenHeight - p.y)
         return NSScreen.screens.first(where: { $0.frame.contains(appKitPoint) })
+    }
+
+    /// 把生成失败的 error 映射成简洁中文 UI 文案（完整 error 已 NSLog，此处仅面向用户）。
+    /// 仅文案优化，不改控制流：网络/鉴权/解析分类，其余给通用兜底。
+    private static func userFacingMessage(for error: Error) -> String {
+        if let pe = error as? ProviderError {
+            switch pe {
+            case .missingAPIKey:
+                return "失败：未配置 API Key"
+            case .network:
+                return "失败：网络连接异常"
+            case .invalidResponse:
+                return "失败：响应解析异常"
+            case .httpError(let status, _):
+                switch status {
+                case 401, 403:
+                    return "失败：鉴权失败（请检查 API Key）"
+                case 429:
+                    return "失败：请求过于频繁，请稍后重试"
+                case 500...599:
+                    return "失败：服务端异常（\(status)）"
+                default:
+                    return "失败：请求出错（\(status)）"
+                }
+            }
+        }
+        let ns = error as NSError
+        // Foundation URL 层网络错误（如断网/超时）：归为网络异常。
+        if ns.domain == NSURLErrorDomain {
+            return "失败：网络连接异常"
+        }
+        return "失败：生成出错，请重试"
     }
 }
