@@ -38,3 +38,19 @@ private func sampleContext(draft: String = "") -> ChatContext {
     let mentionsDraft = withoutUser.contains("草稿")
     #expect(mentionsDraft == false)
 }
+
+@Test func systemMentionsMultiBubbleWhenOtherSentSeveral() {
+    let ctx = ChatContext(
+        contactName: "张婷",
+        messages: [
+            ChatMessage(speaker: .me, text: "在"),
+            ChatMessage(speaker: .other, text: "在吗"),
+            ChatMessage(speaker: .other, text: "出来玩不"),
+            ChatMessage(speaker: .other, text: "就现在"),
+        ],
+        draft: "")
+    let sys = PromptBuilder.build(context: ctx, style: .concise, candidateCount: 3).first?.content ?? ""
+    #expect(sys.contains("连发"))      // 提到对方连发
+    #expect(sys.contains("3"))         // 连发条数(也=候选数，均为3)
+    #expect(sys.contains("换行"))      // 多气泡用换行分隔
+}
