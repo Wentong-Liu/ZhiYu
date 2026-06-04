@@ -84,33 +84,31 @@ enum VoiceTranscriber {
         var attempts = 0
         let tStart = ProcessInfo.processInfo.systemUptime
         let overallDeadline = tStart + 1.6
-        // 重试打开菜单：刚关上一个菜单后，微信可能短暂拒绝 AXShowMenu(立即返回、菜单没出来)，重试即可。
         while ProcessInfo.processInfo.systemUptime < overallDeadline, target == nil {
             if Task.isCancelled { return false }
             attempts += 1
-            AXUIElementSetMessagingTimeout(bubble, 0.05)  // 该调用最多等 50ms 返回(菜单是 WeChat 副作用、照样弹出)
+            AXUIElementSetMessagingTimeout(bubble, 0.05)
+            let tShow = ProcessInfo.processInfo.systemUptime
             AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
-            // 短轮询等菜单出现并拿到「转文字」项（热路径只查右面板，瞬时）。
-            let pollEnd = ProcessInfo.processInfo.systemUptime + 0.25
+            let showMs = (ProcessInfo.processInfo.systemUptime - tShow) * 1000
+            // 动作刚返回，先廉价查一下菜单是否已出现（兼顾"接受且极快渲染"的情况，避免误重试）。
+            if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) { target = it; foundMenu = menu; break }
+            if showMs < 30 {
+                // ~1ms 立即返回 = 被微信短暂拒绝、菜单没弹 → 稍等直接重试 AXShowMenu，不空轮询。
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                continue
+            }
+            // 已接受(~50ms 超时返回)但菜单尚未进 AX 树 → 短轮询等它出现。
+            let pollEnd = ProcessInfo.processInfo.systemUptime + 0.3
             while ProcessInfo.processInfo.systemUptime < pollEnd {
                 if Task.isCancelled { return false }
-                if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) {
-                    target = it
-                    foundMenu = menu
-                    break
-                }
+                if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) { target = it; foundMenu = menu; break }
                 try? await Task.sleep(nanoseconds: 20_000_000)
             }
-            if target == nil {
-                try? await Task.sleep(nanoseconds: 100_000_000)  // 菜单没出来(被微信短暂拒绝)→稍等再重试 AXShowMenu
-            }
+            if target == nil { try? await Task.sleep(nanoseconds: 80_000_000) }
         }
-        // 一次性全树兜底（右面板始终没找到时，才做一次慢但稳的全树深遍历）。
-        if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) {
-            target = it
-            foundMenu = menu
-        }
-        let findMs = (ProcessInfo.processInfo.systemUptime - tStart) * 1000  // 临时埋点：找菜单总耗时
+        if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) { target = it; foundMenu = menu }
+        let findMs = (ProcessInfo.processInfo.systemUptime - tStart) * 1000  // 临时埋点
         guard let target else {
             NSLog("[VT] 单条: 找菜单=%.0fms 尝试=%d次 via=none", findMs, attempts)
             if let stray = dfsMenu(panel) {
@@ -119,10 +117,10 @@ enum VoiceTranscriber {
             }
             return false
         }
-        AXUIElementPerformAction(target, "AXPress" as CFString)  // 选中即关菜单并开始转写（服务器异步转）
-        let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点：关菜单起点
+        AXUIElementPerformAction(target, "AXPress" as CFString)
+        let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点
         if let m = foundMenu { await waitMenuClosed(m) }
-        let dismissMs = (ProcessInfo.processInfo.systemUptime - tPress) * 1000  // 临时埋点：关菜单耗时
+        let dismissMs = (ProcessInfo.processInfo.systemUptime - tPress) * 1000  // 临时埋点
         NSLog("[VT] 单条: 找菜单=%.0fms 尝试=%d次 via=panel 关菜单=%.0fms", findMs, attempts, dismissMs)
         return true
     }
