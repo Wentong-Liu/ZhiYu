@@ -93,12 +93,21 @@ enum WeChatAXProbe {
         var diagnostics: [String]   // 定位/回退诊断信息
     }
 
+    /// 统一的"这是微信吗"名字白名单（bundle id 或本地化名 WeChat/微信）。
+    /// findWeChatApp 的查找子句与 CandidatePanelController 的"前台是不是微信"复用同一口径。
+    static func isWeChat(_ app: NSRunningApplication) -> Bool {
+        if let id = app.bundleIdentifier, bundleIDs.contains(id) { return true }
+        return app.localizedName == "WeChat" || app.localizedName == "微信"
+    }
+
     static func findWeChatApp() -> NSRunningApplication? {
         let apps = NSWorkspace.shared.runningApplications
+        // byID 优先：bundle id 命中者优先返回（多实例时偏向标准包）。
         if let byID = apps.first(where: { ($0.bundleIdentifier).map(bundleIDs.contains) ?? false }) {
             return byID
         }
-        return apps.first(where: { $0.localizedName == "WeChat" || $0.localizedName == "微信" })
+        // 名字匹配复用统一白名单（与 isWeChatFrontmost 同口径）。
+        return apps.first(where: isWeChat)
     }
 
     /// 【共享唤醒助手】对 app 元素设置 AXManualAccessibility / AXEnhancedUserInterface。
@@ -128,8 +137,7 @@ enum WeChatAXProbe {
         wakeAccessibility(appElement)
 
         // a. focusedWindow
-        guard let window = copyElement(appElement, "AXFocusedWindow")
-                ?? copyElement(appElement, "AXMainWindow") else {
+        guard let window = focusedOrMainWindow(of: appElement) else {
             return .failure(.noWindow)
         }
 
@@ -202,15 +210,11 @@ enum WeChatAXProbe {
     static func cheapSignature() -> String? {
         guard AXIsProcessTrusted(), let app = findWeChatApp() else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        guard let window = copyElement(appElement, "AXFocusedWindow")
-                ?? copyElement(appElement, "AXMainWindow") else { return nil }
+        guard let window = focusedOrMainWindow(of: appElement) else { return nil }
         var diag: [String] = []
         guard let panel = locateRightPanel(window: window, diagnostics: &diag),
               let table = locateMessageTable(in: panel) else { return nil }
-        let rows = children(table).filter {
-            let r = role($0)
-            return r == roleRow || r == roleTableRow
-        }
+        let rows = rows(of: table)
         guard let lastRow = rows.last else {
             // 拿不到行（个别版本把行挂在 AXColumn 下）：仅用子节点数粗指纹，仍能反映新增。
             return "n\(children(table).count)"
@@ -334,10 +338,7 @@ enum WeChatAXProbe {
     /// 只读 AXValue，解析说话人，取最后 N 行。
     private static func readMessages(from table: AXUIElement, diagnostics: inout [String]) -> [Message] {
         let allChildren = children(table)
-        let rows = allChildren.filter {
-            let r = role($0)
-            return r == roleRow || r == roleTableRow
-        }
+        let rows = rows(of: table)
         // 行路径：每行取首个非空文本，同时在行子树检测图片/表情的 frame。
         var parsed: [Message] = []
         for row in rows {
@@ -522,6 +523,26 @@ enum WeChatAXProbe {
 
     static func role(_ el: AXUIElement) -> String { copyString(el, "AXRole") ?? "" }
 
+    /// 读取元素支持的 action 名列表（AXShowMenu/AXPress 等）。供 VoiceTranscriber/StickerSender 复用。
+    static func actions(_ el: AXUIElement) -> [String] {
+        var arr: CFArray?
+        guard AXUIElementCopyActionNames(el, &arr) == .success, let a = arr as? [String] else { return [] }
+        return a
+    }
+
+    /// 拿到 app 的前台窗口：AXFocusedWindow 优先，回退 AXMainWindow。各站点统一调用此封装。
+    static func focusedOrMainWindow(of app: AXUIElement) -> AXUIElement? {
+        copyElement(app, "AXFocusedWindow") ?? copyElement(app, "AXMainWindow")
+    }
+
+    /// 抽取表的直接行子节点（role==AXRow 或 AXTableRow）。cheapSignature 与 readMessages 复用。
+    static func rows(of table: AXUIElement) -> [AXUIElement] {
+        children(table).filter {
+            let r = role($0)
+            return r == roleRow || r == roleTableRow
+        }
+    }
+
     static func frame(of el: AXUIElement) -> CGRect? {
         var posValue: CFTypeRef?
         var sizeValue: CFTypeRef?
@@ -595,8 +616,7 @@ enum WeChatAXProbe {
         guard let app = findWeChatApp() else { return .failure(.weChatNotRunning) }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         wakeAccessibility(appElement)
-        guard let window = copyElement(appElement, "AXFocusedWindow")
-                ?? copyElement(appElement, "AXMainWindow") else {
+        guard let window = focusedOrMainWindow(of: appElement) else {
             return .failure(.noWindow)
         }
         var lines: [String] = []

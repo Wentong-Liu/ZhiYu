@@ -20,8 +20,7 @@ enum StickerSender {
         WeChatAXProbe.wakeAccessibility(appEl)
 
         // 1) 打开表情面板：AXPress 主窗口右侧「表情」按钮。
-        guard let window = WeChatAXProbe.copyElement(appEl, "AXFocusedWindow")
-                ?? WeChatAXProbe.copyElement(appEl, "AXMainWindow") else { fail("拿不到微信窗口"); return false }
+        guard let window = WeChatAXProbe.focusedOrMainWindow(of: appEl) else { fail("拿不到微信窗口"); return false }
         let panelRoot = WeChatAXProbe.rightPanelRoot(window: window)
         guard let emojiBtn = findButton(in: panelRoot, title: "表情") else { fail("未找到「表情」按钮"); return false }
         AXUIElementPerformAction(emojiBtn, "AXPress" as CFString)
@@ -81,12 +80,11 @@ enum StickerSender {
         guard let toolbar else { return nil }
         var groups: [AXUIElement] = []
         collectRole("AXGroup", in: toolbar, into: &groups)
+        // 排序前把 (element, frame) 物化为快照：sort 闭包不再二次读 AX、不再 force-unwrap。
         return groups
-            .filter { WeChatAXProbe.frame(of: $0) != nil }
-            .min(by: { lhs, rhs in
-                let a = WeChatAXProbe.frame(of: lhs)!, b = WeChatAXProbe.frame(of: rhs)!
-                return (a.minX, a.minY) < (b.minX, b.minY)
-            })
+            .compactMap { el in WeChatAXProbe.frame(of: el).map { (el, $0) } }
+            .min(by: { ($0.1.minX, $0.1.minY) < ($1.1.minX, $1.1.minY) })?
+            .0
     }
 
     private static func firstResultCell(in popover: AXUIElement) -> AXUIElement? {
@@ -94,12 +92,13 @@ enum StickerSender {
         collectMatching(in: popover, into: &cells) { el in
             guard WeChatAXProbe.role(el) == "AXStaticText",
                   let f = WeChatAXProbe.frame(of: el), f.width >= 60, f.height >= 60 else { return false }
-            return actions(el).contains("AXPress")
+            return WeChatAXProbe.actions(el).contains("AXPress")
         }
-        return cells.min(by: { lhs, rhs in
-            let a = WeChatAXProbe.frame(of: lhs)!, b = WeChatAXProbe.frame(of: rhs)!
-            return (a.minY, a.minX) < (b.minY, b.minX)
-        })
+        // 排序前把 (element, frame) 物化为快照：sort 闭包不再二次读 AX、不再 force-unwrap。
+        return cells
+            .compactMap { el in WeChatAXProbe.frame(of: el).map { (el, $0) } }
+            .min(by: { ($0.1.minY, $0.1.minX) < ($1.1.minY, $1.1.minX) })?
+            .0
     }
 
     // MARK: - AX 遍历/动作工具
@@ -144,11 +143,6 @@ enum StickerSender {
             for c in WeChatAXProbe.children(el) { walk(c, d + 1) }
         }
         walk(root, 0)
-    }
-    private static func actions(_ el: AXUIElement) -> [String] {
-        var arr: CFArray?
-        guard AXUIElementCopyActionNames(el, &arr) == .success, let a = arr as? [String] else { return [] }
-        return a
     }
     private static func isSettable(_ el: AXUIElement, _ attr: String) -> Bool {
         var b = DarwinBoolean(false)

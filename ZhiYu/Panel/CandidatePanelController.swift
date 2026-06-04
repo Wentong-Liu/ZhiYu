@@ -168,8 +168,7 @@ final class CandidatePanelController: NSObject {
 
     private func isWeChatFrontmost() -> Bool {
         guard let front = NSWorkspace.shared.frontmostApplication else { return false }
-        return WeChatAXProbe.bundleIDs.contains(front.bundleIdentifier ?? "")
-            || front.localizedName == "WeChat" || front.localizedName == "微信"
+        return WeChatAXProbe.isWeChat(front)
     }
 
     private func showPanel(anchorAXFrame axFrame: CGRect) {

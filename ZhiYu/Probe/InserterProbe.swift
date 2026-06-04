@@ -22,8 +22,7 @@ enum InserterProbe {
         guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         WeChatAXProbe.wakeAccessibility(appElement)
-        guard let window = WeChatAXProbe.copyElement(appElement, "AXFocusedWindow")
-                ?? WeChatAXProbe.copyElement(appElement, "AXMainWindow") else { return nil }
+        guard let window = WeChatAXProbe.focusedOrMainWindow(of: appElement) else { return nil }
         let root = WeChatAXProbe.rightPanelRoot(window: window)
         let editables = WeChatAXProbe.collectEditables(root)
         return WeChatAXProbe.pickComposer(from: editables)?.element

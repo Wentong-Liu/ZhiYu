@@ -31,8 +31,7 @@ enum VoiceTranscriber {
         app.activate(options: [])
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
         WeChatAXProbe.wakeAccessibility(appEl)
-        guard let window = WeChatAXProbe.copyElement(appEl, "AXFocusedWindow")
-                ?? WeChatAXProbe.copyElement(appEl, "AXMainWindow") else { return }
+        guard let window = WeChatAXProbe.focusedOrMainWindow(of: appEl) else { return }
         let panel = WeChatAXProbe.rightPanelRoot(window: window)
 
         // 文档顺序是 上(旧)→下(新)；reversed() 得到 新→旧，prefix(max) 取最近最多 max 条。
@@ -61,15 +60,14 @@ enum VoiceTranscriber {
     static func hasUnconvertedLoaded() -> Bool {
         guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return false }
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
-        guard let window = WeChatAXProbe.copyElement(appEl, "AXFocusedWindow")
-                ?? WeChatAXProbe.copyElement(appEl, "AXMainWindow") else { return false }
+        guard let window = WeChatAXProbe.focusedOrMainWindow(of: appEl) else { return false }
         return !unconvertedVoices(in: WeChatAXProbe.rightPanelRoot(window: window)).isEmpty
     }
 
     // MARK: - 单条触发
 
     private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
-        guard actions(bubble).contains("AXShowMenu") else { return false }
+        guard WeChatAXProbe.actions(bubble).contains("AXShowMenu") else { return false }
         var target: AXUIElement?
         var foundMenu: AXUIElement?
         let tStart = ProcessInfo.processInfo.systemUptime
@@ -168,11 +166,5 @@ enum VoiceTranscriber {
         }
         walk(root, 0)
         return result
-    }
-
-    private static func actions(_ el: AXUIElement) -> [String] {
-        var arr: CFArray?
-        guard AXUIElementCopyActionNames(el, &arr) == .success, let a = arr as? [String] else { return [] }
-        return a
     }
 }
