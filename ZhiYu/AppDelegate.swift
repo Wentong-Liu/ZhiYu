@@ -4,8 +4,6 @@ import AppKit
 /// 用运行时 activationPolicy(.accessory) 实现，避免改 pbxproj/Info.plist。
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let doubleTap = RightCommandDoubleTap()
-    // 【临时诊断】双击左⌘ → dump 微信表情面板 AX；验证完连同 StickerProbeHotkey/StickerPanelProbe 删除。
-    private let stickerProbe = StickerProbeHotkey()
     private var isDuplicate = false
 
     /// 单实例限制：已有同 bundle 的知语在运行，则本次启动直接退出（避免双实例＝两套监听/两个面板）。
@@ -29,6 +27,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CandidatePanelController.shared.trigger()
         }
         doubleTap.start()
-        stickerProbe.start()
     }
 }

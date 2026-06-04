@@ -26,12 +26,9 @@ enum StickerSender {
         guard let emojiBtn = findButton(in: panelRoot, title: "表情") else { fail("未找到「表情」按钮"); return false }
         AXUIElementPerformAction(emojiBtn, "AXPress" as CFString)
 
-        let t0 = ProcessInfo.processInfo.systemUptime
-
         // 2) 等 popover（app 顶层浅查，避免 DFS 扎进左侧巨表导致误返回 nil/变慢）。
         guard let popover = await poll(timeout: 2.0, { findPopoverShallow(appEl) ?? findRole("AXPopover", in: appEl) })
         else { fail("表情面板(popover)未出现"); return false }
-        NSLog("[StickerSender] popover 用时 %.0fms", (ProcessInfo.processInfo.systemUptime - t0) * 1000)
 
         // 3) 进搜索：🔍 无 AX 动作（只是无标签 AXImage），只能坐标点。
         //    搜索框已在(面板记住搜索态)则跳过；否则等面板布局稳定后直接坐标点 🔍——不再做无谓的 AXPress + 轮询等待。
@@ -44,7 +41,6 @@ enum StickerSender {
             }
         }
         guard let field = await poll(timeout: 1.6, { searchField(in: popover) }) else { fail("未进入表情搜索框"); return false }
-        NSLog("[StickerSender] 进入搜索 用时 %.0fms", (ProcessInfo.processInfo.systemUptime - t0) * 1000)
 
         // 4) 写关键词 + 回车。
         AXUIElementSetAttributeValue(field, "AXValue" as CFString, keyword as CFString)

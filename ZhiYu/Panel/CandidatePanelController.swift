@@ -15,9 +15,6 @@ final class CandidatePanelController: NSObject {
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
 
-    /// 【临时·联调】模型没给表情关键词时强制一个，方便测「发表情」发送链路。联调完置回 nil 即可。
-    private static let debugForceSticker: String? = "哈哈"
-
     /// 双击触发入口。
     func trigger() {
         // 双击是键盘手势，鼠标"外部点击"监听不会关掉上一个面板；重复触发前先收掉残留面板/监听，避免两个面板层叠。
@@ -46,9 +43,9 @@ final class CandidatePanelController: NSObject {
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
                 self.model.candidates = result.candidates
-                self.model.stickerKeyword = result.stickerKeyword ?? Self.debugForceSticker
+                self.model.stickerKeyword = result.stickerKeyword
                 self.model.isLoading = false
-                if result.candidates.isEmpty && self.model.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
+                if result.candidates.isEmpty && result.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
                 self.relayout()  // 内容到位后按真实高度重新布局
             } catch {
                 self.model.isLoading = false
