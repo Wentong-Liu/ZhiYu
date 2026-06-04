@@ -31,6 +31,28 @@ enum InserterProbe {
         return WeChatAXProbe.copyString(field, "AXValue")
     }
 
+    /// 读取当前 composer 的 AXFocused，用于回车前确认键盘焦点是否真正落在输入框。
+    /// 部分实现可能不暴露该属性（返回 nil），调用方据此做容错（nil 不等于 false，需结合前台校验）。
+    static func composerFocused() -> Bool? {
+        guard let field = locateComposer() else { return nil }
+        return WeChatAXProbe.copyBool(field, "AXFocused")
+    }
+
+    /// 回车前的前台/焦点二次校验：activate() 是异步 fire-and-forget，AXValue 写入成功不代表
+    /// 微信已是前台键盘焦点持有者；这里显式校验「微信已在前台」，并尽量结合 composer AXFocused。
+    /// 满足任一强信号即视为可回车：
+    /// - 微信进程 isActive（NSWorkspace.frontmostApplication 即微信）—— 前台已落定的权威信号；
+    /// - composer AXFocused == true —— 输入框已持有键盘焦点。
+    /// 二者都拿不到肯定信号时返回 false，调用方应放弃回车以免事件进错窗口导致整条不发送。
+    static func isWeChatFrontFocused() -> Bool {
+        let appActive = WeChatAXProbe.findWeChatApp()?.isActive ?? false
+        let frontIsWeChat = NSWorkspace.shared.frontmostApplication
+            .flatMap { $0.bundleIdentifier }
+            .map { WeChatAXProbe.bundleIDs.contains($0) } ?? false
+        let focused = composerFocused() ?? false
+        return appActive || frontIsWeChat || focused
+    }
+
     /// AX 写入后用于发送前的「激活 + 聚焦」：
     /// - locateComposer() 拿到底部 composer 元素；
     /// - 对其设 AXFocused = true 让输入框获得键盘焦点（容错：部分实现不支持该属性，

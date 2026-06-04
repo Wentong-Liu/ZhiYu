@@ -67,17 +67,24 @@ final class ProbeViewModel: ObservableObject {
         let ok = InserterProbe.setText(text)
         // b. 激活微信 + 聚焦 composer：之前只写值没激活/聚焦，回车进了探针窗口导致不发送。
         let located = InserterProbe.focusComposerAndActivate()
-        // c. 留时间让激活/聚焦生效，再校验 AXValue 已写入后回车，避免写值未生效就回车发空消息。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        // c. activate() 是异步 fire-and-forget，前台切换/键盘焦点转移由 WindowServer 异步完成，
+        //    0.2s 在冷启动/系统忙时可能不足。延时提升到 0.4s（与 pasteAndSend 的 0.45s 量级对齐），
+        //    回车前除校验 AXValue 已写入（防发空），再显式校验微信已在前台/输入框已聚焦
+        //    （防回车进错窗口导致整条不发送）——二者互补。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             let written = InserterProbe.composerValue() ?? ""
             guard written.contains(text) else {
                 self.output = "写入(\(ok))/定位(\(located))后校验失败：composer 当前值为「\(written)」，未模拟回车以免发空消息"
                 return
             }
+            guard InserterProbe.isWeChatFrontFocused() else {
+                self.output = "写入(\(ok))/定位(\(located))且草稿已写入，但微信未在前台/输入框未聚焦，未模拟回车以免回车进错窗口（请手动点一下微信再试）"
+                return
+            }
             InserterProbe.sendReturn()
-            self.output = "写入(\(ok))并激活聚焦校验通过后已模拟回车，请在「文件传输助手」确认是否发出"
+            self.output = "写入(\(ok))并激活聚焦、前台/焦点校验通过后已模拟回车，请在「文件传输助手」确认是否发出"
         }
-        output = "已写入(\(ok))/定位(\(located))，将在激活聚焦后校验 AXValue 再回车，请在「文件传输助手」确认是否发出"
+        output = "已写入(\(ok))/定位(\(located))，将在激活聚焦后校验 AXValue 与前台/焦点再回车，请在「文件传输助手」确认是否发出"
     }
 
     /// 验证真实发送路径：粘贴已被证实可用，由粘贴完成回调驱动回车（不再用解耦的独立计时器）。
