@@ -84,13 +84,18 @@ enum VoiceTranscriber {
         guard actions(bubble).contains("AXShowMenu") else { return false }
         // 弹菜单前先确保无残留菜单，避免本条 AXShowMenu 命中旧菜单。
         await waitMenuDismissed(panel: panel)
-        let tShow = ProcessInfo.processInfo.systemUptime  // 临时埋点：AXShowMenu 起点
+        // 临时埋点：单独测 AXShowMenu 调用本身耗时（怀疑此调用阻塞 ~1.5s）。
+        let tA = ProcessInfo.processInfo.systemUptime
         AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
+        let showMs = (ProcessInfo.processInfo.systemUptime - tA) * 1000
 
         // 0.6s 窗口内持续轮询（步进 20ms），等「转文字」项出现。热路径只查右面板（瞬时）。
         var target: AXUIElement?
+        var iters = 0  // 临时埋点：轮询迭代次数
+        let tLoop = ProcessInfo.processInfo.systemUptime  // 临时埋点：轮询起点
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.6 {
+            iters += 1
             if Task.isCancelled { return false }  // ESC 已取消：放弃本条触发
             if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) {
                 target = it
@@ -98,6 +103,7 @@ enum VoiceTranscriber {
             }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+        let loopMs = (ProcessInfo.processInfo.systemUptime - tLoop) * 1000  // 临时埋点：轮询总耗时
         // 临时埋点：右面板轮询结束时的节点数 / 是否在右面板命中
         let panelNodes = Self.lastDfsNodes
         let foundInPanel = (target != nil)
@@ -108,12 +114,12 @@ enum VoiceTranscriber {
         }
         // 临时埋点：若走了全树兜底（右面板未命中但兜底命中），记 fallback 那次 dfsMenu(appEl) 的节点数；否则 -1
         let fallbackNodes = (!foundInPanel && target != nil) ? Self.lastDfsNodes : -1
-        let findMs = (ProcessInfo.processInfo.systemUptime - tShow) * 1000  // 临时埋点：找菜单总耗时
+        _ = fallbackNodes  // 暂留兜底节点数变量（细化日志已不打印），避免误删兜底逻辑
 
         guard let target else {
             // 临时埋点：none 路径也记一行，便于核对没找到的占比与耗时
-            NSLog("[VT] 单条: 找菜单=%.0fms via=none panelNodes=%d fallbackNodes=%d 关菜单=-1ms",
-                  findMs, panelNodes, fallbackNodes)
+            NSLog("[VT] 单条: AXShowMenu=%.0fms 轮询=%.0fms(%d次) via=none panelNodes=%d 关菜单=-1ms",
+                  showMs, loopMs, iters, panelNodes)
             // 整个窗口都没等到「转文字」：兜底关掉此刻任何遗留菜单，再放弃这条。
             if let stray = dfsMenu(panel) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
@@ -127,8 +133,8 @@ enum VoiceTranscriber {
         let tPress = ProcessInfo.processInfo.systemUptime  // 临时埋点：AXPress 后等关菜单起点
         await waitMenuDismissed(panel: panel)
         let dismissMs = (ProcessInfo.processInfo.systemUptime - tPress) * 1000  // 临时埋点：关菜单耗时
-        NSLog("[VT] 单条: 找菜单=%.0fms via=%@ panelNodes=%d fallbackNodes=%d 关菜单=%.0fms",
-              findMs, foundInPanel ? "panel" : "FALLBACK全树", panelNodes, fallbackNodes, dismissMs)
+        NSLog("[VT] 单条: AXShowMenu=%.0fms 轮询=%.0fms(%d次) via=%@ panelNodes=%d 关菜单=%.0fms",
+              showMs, loopMs, iters, foundInPanel ? "panel" : (target != nil ? "FALLBACK" : "none"), panelNodes, dismissMs)
         return true
     }
 
