@@ -8,11 +8,15 @@ final class CandidatePanelController: NSObject {
     static let shared = CandidatePanelController()
 
     private var panel: NSPanel?
+    private var anchorAXFrame: CGRect = .zero
     private let model = CandidatePanelModel()
     private let cache = CandidateCache()
     private var keyMonitor: Any?
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
+
+    /// 【临时·联调】模型没给表情关键词时强制一个，方便测「发表情」发送链路。联调完置回 nil 即可。
+    private static let debugForceSticker: String? = "哈哈"
 
     /// 双击触发入口。
     func trigger() {
@@ -23,12 +27,13 @@ final class CandidatePanelController: NSObject {
         }
         let baseContext = snapshot.context
         let imageFrames = snapshot.imageFrames
-        showPanel(anchorAXFrame: frame)
+        // 先复位到加载态再建面板：面板按"加载态"测高，内容到位后再 relayout，避免沿用上次内容的尺寸。
         model.isLoading = true
         model.candidates = []
         model.stickerKeyword = nil
         model.status = ""
         model.providerLabel = AppConfig.shared.providerLabel
+        showPanel(anchorAXFrame: frame)
         let style = AppConfig.shared.currentStyle()
         Task {
             do {
@@ -39,63 +44,73 @@ final class CandidatePanelController: NSObject {
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
                 self.model.candidates = result.candidates
-                self.model.stickerKeyword = result.stickerKeyword
+                self.model.stickerKeyword = result.stickerKeyword ?? Self.debugForceSticker
                 self.model.isLoading = false
-                if result.candidates.isEmpty && result.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
+                if result.candidates.isEmpty && self.model.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
+                self.relayout()  // 内容到位后按真实高度重新布局
             } catch {
                 self.model.isLoading = false
                 self.model.status = "失败：\(error)"
+                self.relayout()
             }
         }
     }
 
     private func showPanel(anchorAXFrame axFrame: CGRect) {
+        self.anchorAXFrame = axFrame
         model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
         model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
         model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
         model.onDismiss = { [weak self] in self?.dismiss() }
+
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 120),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.level = .floating
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.contentView = NSHostingView(rootView: CandidatePanelView(model: model, scrollable: false, maxHeight: .greatestFiniteMagnitude))
+        self.panel = p
+        relayout()
+        p.orderFrontRegardless()
+
+        installKeyMonitor()
+        installOutsideClickMonitor()
+    }
+
+    /// 按当前 model 内容重新测高、调整面板尺寸与位置（内容到位后调用）。
+    /// 透明外边距 shadowPad 计入窗口尺寸，并从 gap/x 里扣除，故卡片视觉位置不变。
+    private func relayout() {
+        guard let panel = self.panel else { return }
+        let axFrame = self.anchorAXFrame
+        let pad = CandidatePanelView.shadowPad
 
         let screen = screenContaining(axPointTopLeft: CGPoint(x: axFrame.midX, y: axFrame.minY))
             ?? NSScreen.main ?? NSScreen.screens.first
         let vf = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let available = max(220, vf.height - 24)
 
-        // 1) 测自然内容高度（不滚动）
+        // 测自然高度（含 2*pad 外边距）。
         let measure = NSHostingView(rootView: CandidatePanelView(model: model, scrollable: false, maxHeight: .greatestFiniteMagnitude))
         measure.layout()
         let natural = measure.fittingSize
-        let width = max(natural.width, 440)
+        let width = max(natural.width, 440 + 2 * pad)
         let needScroll = natural.height > available
         let panelH = min(natural.height, available)
 
-        // 2) 实际 hosting：超高则滚动，固定高度 = panelH
-        let hosting = NSHostingView(rootView: CandidatePanelView(model: model, scrollable: needScroll, maxHeight: panelH))
-        hosting.frame = NSRect(x: 0, y: 0, width: width, height: panelH)
-        hosting.layout()
-        let size = NSSize(width: width, height: panelH)
+        // 滚动态下，卡片的 maxHeight 应扣除上下外边距。
+        if let host = panel.contentView as? NSHostingView<CandidatePanelView> {
+            host.rootView = CandidatePanelView(model: model, scrollable: needScroll, maxHeight: panelH - 2 * pad)
+        }
+        panel.setContentSize(NSSize(width: width, height: panelH))
 
-        let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.level = .floating
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.hasShadow = false
-        p.contentView = hosting
-
-        // AX->AppKit 是基于主屏高度的全局 y 翻转（与 composer 落在哪块屏无关）；副屏的
-        // x/y 偏移已隐含在 AX 全局坐标里，所以这里传主屏高度而非目标屏高度。
+        // AX->AppKit 全局 y 翻转（基于主屏高度）；外边距 pad 从 gap/x 扣除以保持卡片视觉位置。
         var origin = PanelPositioning.panelOrigin(composerAXFrame: axFrame,
-                                                  primaryScreenHeight: Self.primaryScreenHeight, gap: 8)
-        // 换算后的 origin 已是 AppKit 全局坐标；下面用目标屏的全局 visibleFrame 夹取，
-        // size.height 已 <= available <= vf.height，夹取必落在该屏可视区内。
-        origin.x = max(vf.minX, min(origin.x, vf.maxX - size.width))
-        origin.y = max(vf.minY, min(origin.y, vf.maxY - size.height))
-        p.setFrameOrigin(origin)
-        p.orderFrontRegardless()
-        self.panel = p
-
-        installKeyMonitor()
-        installOutsideClickMonitor()
+                                                  primaryScreenHeight: Self.primaryScreenHeight, gap: 8 - pad)
+        origin.x -= pad
+        origin.x = max(vf.minX, min(origin.x, vf.maxX - width))
+        origin.y = max(vf.minY, min(origin.y, vf.maxY - panelH))
+        panel.setFrameOrigin(origin)
     }
 
     /// 在面板存活期间用本地监听处理 1/2/3 与 Esc（nonactivatingPanel 下更稳）。
