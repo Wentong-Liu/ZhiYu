@@ -16,9 +16,38 @@ enum WeChatAXProbe {
     private static let roleTable = "AXTable"
     private static let roleRow = "AXRow"
     private static let roleTableRow = "AXTableRow"
+    private static let roleImage = "AXImage"
+    private static let roleColumn = "AXColumn"
+    private static let roleScrollBar = "AXScrollBar"
 
     /// 快速读取只取最后 N 行消息。
     private static let maxMessages = 30
+
+    // MARK: - 遍历护栏阈值（类型级具名常量，取各处现值不调参）
+
+    /// 消息表定位（含 ScrollArea 浅查）的深度上限。
+    private static let findMessageTableMaxDepth = 40
+    /// 表内首个 AXTable 查找的深度上限。
+    private static let findFirstTableMaxDepth = 20
+    /// 消息表定位/表查找共用的访问节点数上限（同义阈值合并）。
+    private static let tableLookupMaxVisited = 2000
+    /// 右侧面板顶部标题收集的深度上限。
+    private static let collectTopStaticTextsMaxDepth = 12
+    /// 右侧面板顶部标题收集的访问节点数上限。
+    private static let collectTopStaticTextsMaxVisited = 400
+    /// 行内下钻（图片/文本叶子 frame、首个非空文本）的深度上限（同义阈值合并）。
+    private static let rowDescendMaxDepth = 12
+    /// 表子树叶子值兜底收集的深度上限。
+    private static let collectLeafValuesMaxDepth = 24
+    /// 表子树叶子值兜底收集的访问节点数上限。
+    private static let collectLeafValuesMaxVisited = 6000
+    /// 可编辑元素递归收集的深度上限。
+    private static let collectEditablesMaxDepth = 60
+    /// 全树 dump（诊断·慢）的节点数与深度上限。
+    private static let dumpTreeMaxNodes = 2000
+    private static let dumpTreeMaxDepth = 60
+    /// composer 宽度门槛，排除左上角窄搜索框。
+    private static let minComposerWidth: CGFloat = 120
 
     enum ProbeError: Error, CustomStringConvertible {
         case noPermission, weChatNotRunning, noWindow
@@ -236,7 +265,7 @@ enum WeChatAXProbe {
     }
 
     private static func findMessageTable(_ el: AXUIElement, depth: Int, visited: inout Int) -> AXUIElement? {
-        guard depth < 40, visited < 2000 else { return nil }
+        guard depth < findMessageTableMaxDepth, visited < tableLookupMaxVisited else { return nil }
         visited += 1
         if role(el) == roleScrollArea {
             // 在这个 scroll area 子树里找 AXTable。
@@ -253,7 +282,7 @@ enum WeChatAXProbe {
     }
 
     private static func findFirstTable(_ el: AXUIElement, depth: Int, visited: inout Int) -> AXUIElement? {
-        guard depth < 20, visited < 2000 else { return nil }
+        guard depth < findFirstTableMaxDepth, visited < tableLookupMaxVisited else { return nil }
         visited += 1
         if role(el) == roleTable { return el }
         for child in children(el) {
@@ -280,7 +309,7 @@ enum WeChatAXProbe {
                                               depth: Int,
                                               visited: inout Int,
                                               into out: inout [(text: String, minY: CGFloat)]) {
-        guard depth < 12, visited < 400 else { return }
+        guard depth < collectTopStaticTextsMaxDepth, visited < collectTopStaticTextsMaxVisited else { return }
         visited += 1
         let r = role(el)
         // 不下钻 ScrollArea/Table（消息列表、输入区滚动），标题是面板直挂的 AXStaticText。
@@ -339,8 +368,8 @@ enum WeChatAXProbe {
 
     /// 在子树中查找第一个 role==AXImage 的节点的 frame（表情包气泡精确区域）。
     private static func findFirstImageFrame(_ el: AXUIElement, depth: Int) -> CGRect? {
-        guard depth < 12 else { return nil }
-        if role(el) == "AXImage", let f = frame(of: el) { return f }
+        guard depth < rowDescendMaxDepth else { return nil }
+        if role(el) == roleImage, let f = frame(of: el) { return f }
         for child in children(el) {
             if let f = findFirstImageFrame(child, depth: depth + 1) { return f }
         }
@@ -349,7 +378,7 @@ enum WeChatAXProbe {
 
     /// 行内下钻到第一个含非空文本的叶子，返回其 frame（图片消息无子 AXImage 时，截该文本叶子的区域）。
     private static func firstNonEmptyValueFrame(in el: AXUIElement, depth: Int) -> CGRect? {
-        guard depth < 12 else { return nil }
+        guard depth < rowDescendMaxDepth else { return nil }
         if bestText(el) != nil, let f = frame(of: el) { return f }
         for child in children(el) {
             if let f = firstNonEmptyValueFrame(in: child, depth: depth + 1) { return f }
@@ -359,10 +388,10 @@ enum WeChatAXProbe {
 
     /// 表子树内按文档顺序收集叶子节点的非空 AXValue（跳过 AXColumn/滚动条避免与行重复）。
     private static func collectLeafValues(_ el: AXUIElement, depth: Int, visited: inout Int, into out: inout [String]) {
-        guard depth < 24, visited < 6000 else { return }
+        guard depth < collectLeafValuesMaxDepth, visited < collectLeafValuesMaxVisited else { return }
         visited += 1
         let r = role(el)
-        if r == "AXColumn" || r == "AXScrollBar" { return }
+        if r == roleColumn || r == roleScrollBar { return }
         let kids = children(el)
         if kids.isEmpty {
             if let v = bestText(el) {
@@ -377,7 +406,7 @@ enum WeChatAXProbe {
 
     /// 行内下钻到第一个含非空 AXValue 的叶子，只读 AXValue。
     private static func firstNonEmptyValue(in el: AXUIElement, depth: Int) -> String? {
-        guard depth < 12 else { return nil }
+        guard depth < rowDescendMaxDepth else { return nil }
         if let v = bestText(el) {
             return v
         }
@@ -531,7 +560,7 @@ enum WeChatAXProbe {
     private static func collectEditables(_ el: AXUIElement,
                                          into out: inout [Editable],
                                          depth: Int) {
-        guard depth < 60 else { return }
+        guard depth < collectEditablesMaxDepth else { return }
         let r = role(el)
         if r == roleTextArea || r == roleTextField, let f = frame(of: el) {
             out.append(Editable(element: el, role: r, frame: f))
@@ -544,7 +573,6 @@ enum WeChatAXProbe {
     /// 统一的 composer 定位：选 minY 最大（最靠底部）且宽度足够的可编辑元素作为消息输入框，
     /// 排除左上角窄搜索框。读(draft/focus)与写(setText)共用此规则，保证口径一致。
     static func pickComposer(from editables: [Editable]) -> Editable? {
-        let minComposerWidth: CGFloat = 120  // 宽度门槛，排除窄搜索框等
         return editables
             .filter { $0.frame.width >= minComposerWidth }
             .max(by: { $0.frame.minY < $1.frame.minY })
@@ -581,7 +609,7 @@ enum WeChatAXProbe {
                                  depth: Int,
                                  lines: inout [String],
                                  nodeCount: inout Int) {
-        guard nodeCount < 2000, depth < 60 else { return }
+        guard nodeCount < dumpTreeMaxNodes, depth < dumpTreeMaxDepth else { return }
         nodeCount += 1
 
         let r = role(el)

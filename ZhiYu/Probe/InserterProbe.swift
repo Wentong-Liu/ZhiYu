@@ -3,6 +3,10 @@ import ApplicationServices
 
 @MainActor
 enum InserterProbe {
+    /// 虚拟键码（macOS ANSI 键盘）：'v' 与 Return，供模拟粘贴/回车复用。
+    private static let keyCodeV: CGKeyCode = 9
+    private static let keyCodeReturn: CGKeyCode = 36
+
     /// 用 AX 直接把文本设进微信输入框。返回是否成功。
     /// 与探针读取口径一致：复用 collectEditables + pickComposer 定位底部消息输入框，
     /// 不再取 collect() 抓到的第一个可编辑元素（很可能是左上角搜索框）。
@@ -86,7 +90,7 @@ enum InserterProbe {
         // 记录粘贴前的 changeCount，恢复前确认粘贴已被消费，降低 ⌘V 粘到旧内容 / 过早恢复的竞态。
         let changeCountBeforePaste = pb.changeCount
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            postKey(9, flags: .maskCommand)            // 'v'
+            postKey(keyCodeV, flags: .maskCommand)     // 'v'
             restoreSnapshotWhenSafe(saved, into: pb, pasteWriteChangeCount: changeCountBeforePaste)
             completion?()
         }
@@ -140,7 +144,7 @@ enum InserterProbe {
 
     /// 模拟回车发送。
     static func sendReturn() {
-        postKey(36, flags: [])                          // Return
+        postKey(keyCodeReturn, flags: [])               // Return
     }
 
     private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {

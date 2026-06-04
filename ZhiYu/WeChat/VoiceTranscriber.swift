@@ -145,7 +145,7 @@ enum VoiceTranscriber {
         var out: [AXUIElement] = []
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if n > 9000 || d > 55 { return }
+            if n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return }
             n += 1
             if let t = WeChatAXProbe.bestText(el), t.contains(WeChatMarkers.sentVoice), !t.contains(WeChatMarkers.converted) {
                 out.append(el)
@@ -161,7 +161,7 @@ enum VoiceTranscriber {
         var result: AXUIElement?
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if result != nil || n > 8000 || d > 60 { return }
+            if result != nil || n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return }
             n += 1
             if WeChatAXProbe.role(el) == "AXMenu" { result = el; return }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }

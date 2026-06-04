@@ -125,7 +125,7 @@ enum StickerSender {
     private static func findFirst(in root: AXUIElement, _ match: (AXUIElement) -> Bool) -> AXUIElement? {
         var result: AXUIElement?; var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if result != nil || n > 6000 || d > 45 { return }
+            if result != nil || n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return }
             n += 1
             if match(el) { result = el; return }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
@@ -138,7 +138,7 @@ enum StickerSender {
     private static func collectMatching(in root: AXUIElement, into out: inout [AXUIElement], _ match: (AXUIElement) -> Bool) {
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if n > 8000 || d > 45 { return }
+            if n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return }
             n += 1
             if match(el) { out.append(el) }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1) }
