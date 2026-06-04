@@ -26,6 +26,7 @@ final class CandidatePanelController: NSObject {
         showPanel(anchorAXFrame: frame)
         model.isLoading = true
         model.candidates = []
+        model.stickerKeyword = nil
         model.status = ""
         model.providerLabel = AppConfig.shared.providerLabel
         let style = AppConfig.shared.currentStyle()
@@ -37,9 +38,10 @@ final class CandidatePanelController: NSObject {
                 let provider = try await ProviderFactory.make()
                 let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
-                self.model.candidates = result
+                self.model.candidates = result.candidates
+                self.model.stickerKeyword = result.stickerKeyword
                 self.model.isLoading = false
-                if result.isEmpty { self.model.status = "模型没有返回候选" }
+                if result.candidates.isEmpty && result.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
             } catch {
                 self.model.isLoading = false
                 self.model.status = "失败：\(error)"
@@ -50,6 +52,7 @@ final class CandidatePanelController: NSObject {
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
         model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
+        model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
         model.onDismiss = { [weak self] in self?.dismiss() }
 
         let screen = screenContaining(axPointTopLeft: CGPoint(x: axFrame.midX, y: axFrame.minY))

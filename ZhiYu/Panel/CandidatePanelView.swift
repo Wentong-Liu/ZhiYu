@@ -7,9 +7,11 @@ final class CandidatePanelModel: ObservableObject {
     @Published var isLoading = true
     @Published var status = ""
     @Published var candidates: [String] = []
+    @Published var stickerKeyword: String? = nil
     @Published var providerLabel = ""
     var onFill: (String) -> Void = { _ in }
     var onSend: (String) -> Void = { _ in }
+    var onSendSticker: (String) -> Void = { _ in }
     var onDismiss: () -> Void = {}
 }
 
@@ -24,6 +26,7 @@ struct CandidatePanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             content
+            stickerSuggestion
             footer
         }
         .padding(14)
@@ -135,6 +138,30 @@ struct CandidatePanelView: View {
         .animation(.spring(response: 0.5, dampingFraction: 0.82).delay(Double(i) * 0.06), value: appeared)
         .animation(.easeOut(duration: 0.14), value: hoverIndex)
         .onHover { inside in hoverIndex = inside ? i : (hoverIndex == i ? nil : hoverIndex) }
+    }
+
+    @ViewBuilder private var stickerSuggestion: some View {
+        if let kw = model.stickerKeyword, !kw.isEmpty {
+            Button { model.onSendSticker(kw) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("发表情：\(kw)")
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.92))
+                    Spacer()
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.white.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(.white.opacity(0.10), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("用微信表情搜索发出第一个结果")
+        }
     }
 
     private var footer: some View {
