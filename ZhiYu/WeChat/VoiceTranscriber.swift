@@ -143,29 +143,15 @@ enum VoiceTranscriber {
         return out
     }
 
-    /// 找上下文菜单 AXMenu。上下文菜单通常是 application 的顶层子节点：
-    /// 1) 顶层广度优先(深度≤2)——瞬时命中、绝不下钻左侧上千行会话表；
-    /// 2) 剪枝深遍历——跳过行数巨大的会话/消息表(AXTable/AXOutline/AXList)，菜单不在其中；
-    /// 3) 兜底——完整深遍历(慢但稳)，保证可靠性不低于原实现。
+    /// 找上下文菜单 AXMenu：普通深度优先遍历（诊断确认菜单在窗口深处、约 979 节点处命中）。
+    /// 不做剪枝——菜单的 AXChildren 路径会经过 AXList 等节点，剪枝会把通往菜单的路堵死。
     private static func findMenu(_ appEl: AXUIElement) -> AXUIElement? {
-        let kids = WeChatAXProbe.children(appEl)
-        for k in kids where WeChatAXProbe.role(k) == "AXMenu" { return k }
-        for k in kids {
-            for g in WeChatAXProbe.children(k) where WeChatAXProbe.role(g) == "AXMenu" { return g }
-        }
-        if let m = findMenuDFS(appEl, prune: true) { return m }
-        return findMenuDFS(appEl, prune: false)
-    }
-
-    private static func findMenuDFS(_ appEl: AXUIElement, prune: Bool) -> AXUIElement? {
         var result: AXUIElement?
         var n = 0
         func walk(_ el: AXUIElement, _ d: Int) {
-            if result != nil || n > (prune ? 5000 : 8000) || d > 45 { return }
+            if result != nil || n > 8000 || d > 60 { return }
             n += 1
-            let r = WeChatAXProbe.role(el)
-            if r == "AXMenu" { result = el; return }
-            if prune, r == "AXTable" || r == "AXOutline" || r == "AXList" { return }  // 不下钻巨表/巨列表
+            if WeChatAXProbe.role(el) == "AXMenu" { result = el; return }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
         }
         walk(appEl, 0)
