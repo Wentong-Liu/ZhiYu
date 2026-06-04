@@ -79,7 +79,7 @@ final class GenerateViewModel: ObservableObject {
         Task {
             do {
                 let provider = try await ProviderFactory.make()
-                let gen = ReplyGenerator(provider: provider, cache: cache, candidateCount: 3)
+                let gen = ReplyGenerator(provider: provider, cache: cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
                 self.candidates = result
                 self.status = "完成，\(result.count) 条候选"

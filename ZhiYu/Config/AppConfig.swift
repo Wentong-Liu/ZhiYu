@@ -26,4 +26,9 @@ final class AppConfig {
         get { d.integer(forKey: "styleIndex") }
         set { d.set(newValue, forKey: "styleIndex") }
     }
+
+    /// 缓存区分用：Provider+模型 标签，如 "DeepSeek/deepseek-v4-flash"。
+    var modelTag: String { "\(providerKind.rawValue)/\(model)" }
+    /// 面板展示用：如 "DeepSeek · deepseek-v4-flash"。
+    var providerLabel: String { "\(providerKind.rawValue) · \(model)" }
 }

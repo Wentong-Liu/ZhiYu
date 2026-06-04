@@ -30,7 +30,7 @@ final class CandidatePanelController: NSObject {
         Task {
             do {
                 let provider = try await ProviderFactory.make()
-                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3)
+                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
                 self.model.candidates = result
                 self.model.isLoading = false
