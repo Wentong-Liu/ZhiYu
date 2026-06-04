@@ -7,6 +7,16 @@ import ZhiYuCore
 final class CandidatePanelController: NSObject {
     static let shared = CandidatePanelController()
 
+    /// 面板布局常量。
+    private enum Layout {
+        /// 面板底边与 composer 顶边的间隙。
+        static let gap: CGFloat = 8
+        /// 面板可用高度下限（屏太矮时的兜底）。
+        static let minHeight: CGFloat = 220
+        /// 面板高度相对屏 visibleFrame 上下留白。
+        static let screenMargin: CGFloat = 24
+    }
+
     private var panel: NSPanel?
     private var anchorAXFrame: CGRect = .zero
     private let model = CandidatePanelModel()
@@ -76,7 +86,7 @@ final class CandidatePanelController: NSObject {
                 let urls = await WeChatReader.captureImages(imageFrames)
                 let context = WeChatReader.context(baseContext, withImages: urls)
                 let provider = try await ProviderFactory.make()
-                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
+                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: ReplyGenerator.defaultCandidateCount, modelTag: AppConfig.shared.modelTag)
                 let result = try await gen.generate(context: context, style: style)
                 guard generation == self.presentGeneration else { return }  // 陈旧任务：新 present 已接管，不写、不动 isBusy
                 self.model.candidates = result.candidates
@@ -149,7 +159,7 @@ final class CandidatePanelController: NSObject {
         Task {
             do {
                 let provider = try await ProviderFactory.make()
-                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
+                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: ReplyGenerator.defaultCandidateCount, modelTag: AppConfig.shared.modelTag)
                 _ = try await gen.generate(context: ctx, style: style)
                 self.lastPrewarmSig[ctx.contactName] = sig   // 成功后才记指纹；失败留待重试
             } catch { }
@@ -169,7 +179,7 @@ final class CandidatePanelController: NSObject {
         model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
         model.onDismiss = { [weak self] in self?.dismiss() }
 
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 120),
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: CandidatePanelView.baseWidth, height: 120),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.level = .floating
         p.isOpaque = false
@@ -193,13 +203,13 @@ final class CandidatePanelController: NSObject {
         let screen = screenContaining(axPointTopLeft: CGPoint(x: axFrame.midX, y: axFrame.minY))
             ?? NSScreen.main ?? NSScreen.screens.first
         let vf = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let available = max(220, vf.height - 24)
+        let available = max(Layout.minHeight, vf.height - Layout.screenMargin)
 
         // 测自然高度（含 2*pad 外边距）。
         let measure = NSHostingView(rootView: CandidatePanelView(model: model, scrollable: false, maxHeight: .greatestFiniteMagnitude))
         measure.layout()
         let natural = measure.fittingSize
-        let width = max(natural.width, 440 + 2 * pad)
+        let width = max(natural.width, CandidatePanelView.baseWidth + 2 * pad)
         let needScroll = natural.height > available
         let panelH = min(natural.height, available)
 
@@ -211,7 +221,7 @@ final class CandidatePanelController: NSObject {
 
         // AX->AppKit 全局 y 翻转（基于主屏高度）；外边距 pad 从 gap/x 扣除以保持卡片视觉位置。
         var origin = PanelPositioning.panelOrigin(composerAXFrame: axFrame,
-                                                  primaryScreenHeight: Self.primaryScreenHeight, gap: 8 - pad)
+                                                  primaryScreenHeight: Self.primaryScreenHeight, gap: Layout.gap - pad)
         origin.x -= pad
         origin.x = max(vf.minX, min(origin.x, vf.maxX - width))
         origin.y = max(vf.minY, min(origin.y, vf.maxY - panelH))
@@ -226,17 +236,17 @@ final class CandidatePanelController: NSObject {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel != nil else { return event }
             let chars = event.charactersIgnoringModifiers ?? ""
-            switch chars {
-            case "1", "2", "3":
-                if let n = Int(chars), n - 1 < self.model.candidates.count {
+            // 数字键选中：1...候选数 内的数字键填入对应候选（上限与生成数同源）。
+            if let n = Int(chars), n >= 1, n <= ReplyGenerator.defaultCandidateCount {
+                if n - 1 < self.model.candidates.count {
                     self.model.onFill(self.model.candidates[n - 1])
                 }
                 return nil
-            case "\u{1B}": // Esc
-                self.dismiss(); return nil
-            default:
-                return event
             }
+            if chars == "\u{1B}" { // Esc
+                self.dismiss(); return nil
+            }
+            return event
         }
         escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel != nil else { return }

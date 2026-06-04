@@ -3,13 +3,16 @@ import Foundation
 /// 编排一次候选生成：去重缓存命中则复用，否则组 prompt→调模型→解析→存缓存。
 /// 缓存 key 纳入 modelTag（Provider+模型），切换模型不会误命中旧缓存。
 public struct ReplyGenerator: Sendable {
+    /// 默认候选数：面板展示数、键盘 1/2/3 上限与生成数共用这一来源，避免各处各写 3 而漂移。
+    public static let defaultCandidateCount = 3
+
     private let provider: any LLMProvider
     private let cache: CandidateCache
     private let candidateCount: Int
     private let modelTag: String
 
     public init(provider: any LLMProvider, cache: CandidateCache,
-                candidateCount: Int = 3, modelTag: String = "") {
+                candidateCount: Int = ReplyGenerator.defaultCandidateCount, modelTag: String = "") {
         self.provider = provider
         self.cache = cache
         self.candidateCount = candidateCount

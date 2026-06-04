@@ -31,37 +31,46 @@ final class AppConfig {
     static let shared = AppConfig()
     private let d = UserDefaults.standard
 
+    /// 持久化用的 UserDefaults 键。字符串值是落盘键名，**改了会丢已有配置**，不可变。
+    private enum Key {
+        static let providerKind = "providerKind"
+        static let model = "model"
+        static let styleIndex = "styleIndex"
+        static let customPrompt = "customPrompt"
+        static let autoOnNewMessage = "autoOnNewMessage"
+    }
+
     var providerKind: ProviderKind {
-        get { ProviderKind(rawValue: d.string(forKey: "providerKind") ?? "") ?? .openAI }
-        set { d.set(newValue.rawValue, forKey: "providerKind") }
+        get { ProviderKind(rawValue: d.string(forKey: Key.providerKind) ?? "") ?? .openAI }
+        set { d.set(newValue.rawValue, forKey: Key.providerKind) }
     }
     var model: String {
         // 夹回到当前 Provider 的可选模型：持久化的 model 若不属于当前 providerKind
         // （例如换过 Provider 但没点过模型下拉），回落到该 Provider 的默认模型，
         // 避免把不属于该 Provider 的 model id 发给 API。
         get {
-            let stored = d.string(forKey: "model")
+            let stored = d.string(forKey: Key.model)
             let valid = providerKind.modelOptions.map(\.id)
             if let stored, valid.contains(stored) { return stored }
             return providerKind.defaultModel
         }
-        set { d.set(newValue, forKey: "model") }
+        set { d.set(newValue, forKey: Key.model) }
     }
     var styleIndex: Int {
-        get { d.integer(forKey: "styleIndex") }
-        set { d.set(newValue, forKey: "styleIndex") }
+        get { d.integer(forKey: Key.styleIndex) }
+        set { d.set(newValue, forKey: Key.styleIndex) }
     }
 
     /// 自定义提示词（风格选"自定义"时用）。
     var customPrompt: String {
-        get { d.string(forKey: "customPrompt") ?? "" }
-        set { d.set(newValue, forKey: "customPrompt") }
+        get { d.string(forKey: Key.customPrompt) ?? "" }
+        set { d.set(newValue, forKey: Key.customPrompt) }
     }
 
     /// 新消息自动预生成候选、切到微信前台时弹出。默认开。
     var autoOnNewMessage: Bool {
-        get { d.object(forKey: "autoOnNewMessage") == nil ? true : d.bool(forKey: "autoOnNewMessage") }
-        set { d.set(newValue, forKey: "autoOnNewMessage") }
+        get { d.object(forKey: Key.autoOnNewMessage) == nil ? true : d.bool(forKey: Key.autoOnNewMessage) }
+        set { d.set(newValue, forKey: Key.autoOnNewMessage) }
     }
 
     /// 当前风格：styleIndex 落在预设范围内取预设，否则取自定义提示词。

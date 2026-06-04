@@ -21,6 +21,16 @@ struct CandidatePanelView: View {
     /// 控制器据此补偿定位与高度，所以面板视觉位置不变。需 ≥ 阴影外扩范围(radius+|y|)。
     static let shadowPad: CGFloat = 20
 
+    /// 面板内容宽度（不含 shadowPad）。控制器测高/定位时按此计算窗口宽度，故须与此处 frame 同源。
+    static let baseWidth: CGFloat = 440
+
+    /// 候选卡片圆角。
+    private static let cardCornerRadius: CGFloat = 13
+    /// 候选卡片底色不透明度：(默认, 悬停)。
+    private static let cardFillOpacity: (normal: Double, hover: Double) = (0.05, 0.12)
+    /// 候选卡片描边不透明度：(默认, 悬停)。
+    private static let cardStrokeOpacity: (normal: Double, hover: Double) = (0.07, 0.22)
+
     @ObservedObject var model: CandidatePanelModel
     @State private var appeared = false
     @State private var hoverIndex: Int? = nil
@@ -35,7 +45,7 @@ struct CandidatePanelView: View {
             footer
         }
         .padding(14)
-        .frame(width: 440)
+        .frame(width: Self.baseWidth)
         .frame(maxHeight: scrollable ? maxHeight : nil)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -131,12 +141,12 @@ struct CandidatePanelView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(.white.opacity(hoverIndex == i ? 0.12 : 0.05))
+            RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous)
+                .fill(.white.opacity(hoverIndex == i ? Self.cardFillOpacity.hover : Self.cardFillOpacity.normal))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .strokeBorder(.white.opacity(hoverIndex == i ? 0.22 : 0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous)
+                .strokeBorder(.white.opacity(hoverIndex == i ? Self.cardStrokeOpacity.hover : Self.cardStrokeOpacity.normal), lineWidth: 1)
         )
         .scaleEffect(hoverIndex == i ? 1.012 : 1.0)
         .opacity(appeared ? 1 : 0)
