@@ -27,5 +27,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CandidatePanelController.shared.trigger()
         }
         doubleTap.start()
+        NewMessageWatcher.shared.start()
     }
 }

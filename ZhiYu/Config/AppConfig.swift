@@ -58,6 +58,12 @@ final class AppConfig {
         set { d.set(newValue, forKey: "customPrompt") }
     }
 
+    /// 新消息自动预生成候选、切到微信前台时弹出。默认开。
+    var autoOnNewMessage: Bool {
+        get { d.object(forKey: "autoOnNewMessage") == nil ? true : d.bool(forKey: "autoOnNewMessage") }
+        set { d.set(newValue, forKey: "autoOnNewMessage") }
+    }
+
     /// 当前风格：styleIndex 落在预设范围内取预设，否则取自定义提示词。
     func currentStyle() -> ReplyStyle {
         let presets = ReplyStyle.presets

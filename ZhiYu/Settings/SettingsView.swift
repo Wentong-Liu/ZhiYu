@@ -18,6 +18,7 @@ final class SettingsModel: ObservableObject {
     @Published var model: String { didSet { AppConfig.shared.model = model } }
     @Published var styleIndex: Int { didSet { AppConfig.shared.styleIndex = styleIndex } }
     @Published var customPrompt: String { didSet { AppConfig.shared.customPrompt = customPrompt } }
+    @Published var autoOnNewMessage: Bool { didSet { AppConfig.shared.autoOnNewMessage = autoOnNewMessage } }
     @Published var apiKey: String = ""
     @Published var status = ""
     @Published var loggedIn = KeychainStore.loadChatGPTTokens() != nil
@@ -38,6 +39,7 @@ final class SettingsModel: ObservableObject {
         let valid = k.modelOptions.map(\.id)
         model = valid.contains(AppConfig.shared.model) ? AppConfig.shared.model : k.defaultModel
         styleIndex = AppConfig.shared.styleIndex
+        autoOnNewMessage = AppConfig.shared.autoOnNewMessage
         customPrompt = ""
         switch k {
         case .openAI: apiKey = KeychainStore.openAIKey()
@@ -278,6 +280,17 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 Image(systemName: "command").foregroundStyle(.white.opacity(0.8))
                 Text("在微信里 双击右 ⌘ 唤起候选面板").font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("新消息自动生成候选（切到微信前台时弹出）", isOn: $vm.autoOnNewMessage)
+                    .toggleStyle(.switch).tint(.white)
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("对方发来新消息时后台预生成；切到微信前台时弹出候选。")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)

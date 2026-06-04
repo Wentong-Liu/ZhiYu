@@ -15,15 +15,23 @@ final class CandidatePanelController: NSObject {
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
 
-    /// 双击触发入口。
+    /// 已展示过的会话指纹（展示去重，避免 watcher 重复弹同一条）。
+    private var lastAutoSignature: String?
+    /// 已后台预暖过的会话指纹（预暖去重）。
+    private var lastPrewarmSignature: String?
+
+    /// 双击触发：读当前会话快照并展示。
     func trigger() {
-        // 双击是键盘手势，鼠标"外部点击"监听不会关掉上一个面板；重复触发前先收掉残留面板/监听，避免两个面板层叠。
-        dismiss()
         // 只跑一次 AX 探针：上下文与输入框 frame 来自同一快照，避免两次遍历观察到不一致的会话状态。
-        guard let snapshot = WeChatReader.readSnapshot(), !snapshot.context.messages.isEmpty,
-              let frame = snapshot.composerFrame else {
-            NSSound.beep(); return
-        }
+        guard let snapshot = WeChatReader.readSnapshot() else { NSSound.beep(); return }
+        present(snapshot: snapshot)
+    }
+
+    /// 用给定快照展示候选面板（手动/自动共用）。
+    private func present(snapshot: WeChatReader.Snapshot) {
+        guard !snapshot.context.messages.isEmpty, let frame = snapshot.composerFrame else { NSSound.beep(); return }
+        // 双击是键盘手势，鼠标"外部点击"监听不会关掉上一个面板；重复展示前先收掉残留面板/监听，避免两个面板层叠。
+        dismiss()
         let baseContext = snapshot.context
         let imageFrames = snapshot.imageFrames
         // 先复位到加载态再建面板：面板按"加载态"测高，内容到位后再 relayout，避免沿用上次内容的尺寸。
@@ -32,6 +40,7 @@ final class CandidatePanelController: NSObject {
         model.stickerKeyword = nil
         model.status = ""
         model.providerLabel = AppConfig.shared.providerLabel
+        lastAutoSignature = MessageSignal.signature(snapshot.context)  // 记录，避免 watcher 重复弹同一条
         showPanel(anchorAXFrame: frame)
         let style = AppConfig.shared.currentStyle()
         Task {
@@ -53,6 +62,50 @@ final class CandidatePanelController: NSObject {
                 self.relayout()
             }
         }
+    }
+
+    /// 微信切到前台：当前会话有等我回的新消息且未处理过 → 展示（缓存暖则秒出）。
+    func autoOnActivate() {
+        guard AppConfig.shared.autoOnNewMessage else { return }
+        guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
+              MessageSignal.lastIsIncoming(snap.context) else { return }
+        guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
+        present(snapshot: snap)
+    }
+
+    /// AX 事件（防抖后）：有新消息→前台则直接展示，后台则仅预生成暖缓存（图片消息后台不预暖）。
+    func autoOnDetect() {
+        guard AppConfig.shared.autoOnNewMessage else { return }
+        guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty,
+              MessageSignal.lastIsIncoming(snap.context) else { return }
+        guard MessageSignal.signature(snap.context) != lastAutoSignature else { return }
+        if isWeChatFrontmost() {
+            present(snapshot: snap)
+        } else if snap.imageFrames.isEmpty {
+            prewarm(snapshot: snap)
+        }
+    }
+
+    /// 后台仅暖缓存（不弹面板、不设 lastAutoSignature，以便切前台仍会展示）。仅文字/语音（无图）。
+    private func prewarm(snapshot: WeChatReader.Snapshot) {
+        let sig = MessageSignal.signature(snapshot.context)
+        guard sig != lastPrewarmSignature else { return }
+        lastPrewarmSignature = sig
+        let base = snapshot.context
+        let style = AppConfig.shared.currentStyle()
+        Task {
+            do {
+                let provider = try await ProviderFactory.make()
+                let gen = ReplyGenerator(provider: provider, cache: self.cache, candidateCount: 3, modelTag: AppConfig.shared.modelTag)
+                _ = try await gen.generate(context: base, style: style)
+            } catch { }
+        }
+    }
+
+    private func isWeChatFrontmost() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+        return WeChatAXProbe.bundleIDs.contains(front.bundleIdentifier ?? "")
+            || front.localizedName == "WeChat" || front.localizedName == "微信"
     }
 
     private func showPanel(anchorAXFrame axFrame: CGRect) {
