@@ -9,7 +9,9 @@ enum KeychainStore {
     static let deepSeekKeyAccount = "deepseek.apiKey"
     static let chatGPTTokensAccount = "chatgpt.oauthTokens"
 
-    static func set(_ value: String, account: String) {
+    /// 写入凭证。返回是否真正写入成功（SecItemAdd 的 OSStatus == errSecSuccess）。
+    @discardableResult
+    static func set(_ value: String, account: String) -> Bool {
         let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -19,7 +21,11 @@ enum KeychainStore {
         SecItemDelete(query as CFDictionary)
         var add = query
         add[kSecValueData as String] = data
-        SecItemAdd(add as CFDictionary, nil)
+        let status = SecItemAdd(add as CFDictionary, nil)
+        if status != errSecSuccess {
+            NSLog("[KeychainStore] SecItemAdd 写入失败 account=\(account) status=\(status)")
+        }
+        return status == errSecSuccess
     }
 
     static func get(account: String) -> String? {
@@ -37,14 +43,21 @@ enum KeychainStore {
     }
 
     static func openAIKey() -> String { get(account: openAIKeyAccount) ?? "" }
-    static func setOpenAIKey(_ v: String) { set(v, account: openAIKeyAccount) }
+    @discardableResult
+    static func setOpenAIKey(_ v: String) -> Bool { set(v, account: openAIKeyAccount) }
 
     static func deepSeekKey() -> String { get(account: deepSeekKeyAccount) ?? "" }
-    static func setDeepSeekKey(_ v: String) { set(v, account: deepSeekKeyAccount) }
+    @discardableResult
+    static func setDeepSeekKey(_ v: String) -> Bool { set(v, account: deepSeekKeyAccount) }
 
-    static func saveChatGPTTokens(_ tokens: ZhiYuCore.OAuthTokens) {
-        guard let data = try? JSONEncoder().encode(tokens) else { return }
-        set(String(decoding: data, as: UTF8.self), account: chatGPTTokensAccount)
+    /// 写入 ChatGPT OAuth tokens。返回是否真正写入成功（编码失败或 Keychain 写入失败均为 false）。
+    @discardableResult
+    static func saveChatGPTTokens(_ tokens: ZhiYuCore.OAuthTokens) -> Bool {
+        guard let data = try? JSONEncoder().encode(tokens) else {
+            NSLog("[KeychainStore] saveChatGPTTokens 编码失败")
+            return false
+        }
+        return set(String(decoding: data, as: UTF8.self), account: chatGPTTokensAccount)
     }
 
     static func loadChatGPTTokens() -> ZhiYuCore.OAuthTokens? {
@@ -52,12 +65,19 @@ enum KeychainStore {
         return try? JSONDecoder().decode(ZhiYuCore.OAuthTokens.self, from: data)
     }
 
-    static func clearChatGPTTokens() {
+    /// 清除 ChatGPT tokens。返回是否成功（已删除或本就不存在均视为成功）。
+    @discardableResult
+    static func clearChatGPTTokens() -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: chatGPTTokensAccount,
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        let ok = (status == errSecSuccess || status == errSecItemNotFound)
+        if !ok {
+            NSLog("[KeychainStore] clearChatGPTTokens 删除失败 status=\(status)")
+        }
+        return ok
     }
 }

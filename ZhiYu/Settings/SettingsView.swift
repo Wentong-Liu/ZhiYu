@@ -65,8 +65,10 @@ final class SettingsModel: ObservableObject {
     func saveKey() {
         let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         switch currentKind {
-        case .openAI: KeychainStore.setOpenAIKey(k); status = "已保存 OpenAI Key"
-        case .deepSeek: KeychainStore.setDeepSeekKey(k); status = "已保存 DeepSeek Key"
+        case .openAI:
+            status = KeychainStore.setOpenAIKey(k) ? "已保存 OpenAI Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
+        case .deepSeek:
+            status = KeychainStore.setDeepSeekKey(k) ? "已保存 DeepSeek Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
         case .chatGPT: break
         }
     }
