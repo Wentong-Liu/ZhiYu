@@ -6,24 +6,24 @@ public enum VoiceText {
     /// - 否则含 "发送了一个语音"：返回 "[语音]"。
     /// - 否则原样返回。
     public static func clean(_ text: String) -> String {
-        if let range = text.range(of: "已转文字") {
+        if let range = text.range(of: WeChatMarkers.converted) {
             var transcript = String(text[range.upperBound...])
-            transcript = transcript.drop {
+            transcript = String(transcript.drop {
                 $0 == ":" || $0 == "：" || $0.isWhitespace
-            }.description
+            })
             let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 return trimmed
             }
         }
-        if text.contains("发送了一个语音") {
-            return "[语音]"
+        if text.contains(WeChatMarkers.sentVoice) {
+            return WeChatMarkers.voicePlaceholder
         }
-        if text.contains("发送了一个图片") {
-            return "[图片]"
+        if text.contains(WeChatMarkers.sentImage) {
+            return WeChatMarkers.imagePlaceholder
         }
-        if text.contains("发送了一个表情") {
-            return "[表情]"
+        if text.contains(WeChatMarkers.sentSticker) {
+            return WeChatMarkers.stickerPlaceholder
         }
         return text
     }

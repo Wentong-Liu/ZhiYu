@@ -59,7 +59,7 @@ final class CandidatePanelController: NSObject {
             do {
                 // 若会话里有"未转文字"的语音 → 取最近 5 条触发转写并等到完成，转写回来后重读。
                 // transcribeRecentAndWait 已等到转写落地，故重读拿到的是转写后的文本，generate 不会用 [语音] 占位。
-                if baseContext.messages.contains(where: { $0.text.contains("[语音]") }) {
+                if baseContext.messages.contains(where: { $0.text.contains(WeChatMarkers.voicePlaceholder) }) {
                     if generation == self.presentGeneration { self.model.loadingNote = "转写语音中…" }
                     await VoiceTranscriber.transcribeRecentAndWait()
                     if Task.isCancelled { return }  // ESC 已取消：不再重读/生成
@@ -142,7 +142,7 @@ final class CandidatePanelController: NSObject {
     /// 含未转语音的会话直接跳过：后台转写会触发 app.activate 抢焦点，语音的转写只在前台 present() 里做。
     private func prewarm(snapshot: WeChatReader.Snapshot) {
         let ctx = snapshot.context
-        guard !ctx.messages.contains(where: { $0.text.contains("[语音]") }) else { return }  // 含未转语音的会话不在后台预暖（避免转写抢焦点）
+        guard !ctx.messages.contains(where: { $0.text.contains(WeChatMarkers.voicePlaceholder) }) else { return }  // 含未转语音的会话不在后台预暖（避免转写抢焦点）
         let sig = MessageSignal.signature(ctx)                // dedup 用进入时原始 ctx 的指纹作键（同一触发不重复预暖）
         guard lastPrewarmSig[ctx.contactName] != sig else { return }
         let style = AppConfig.shared.currentStyle()

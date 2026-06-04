@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import ZhiYuCore
 
 @MainActor
 enum WeChatAXProbe {
@@ -314,9 +315,9 @@ enum WeChatAXProbe {
             guard let value = firstNonEmptyValue(in: row, depth: 0) else { continue }
             var msg = parseMessage(value)
             // 表情包：行内有 AXImage，取其精确 frame。
-            if value.contains("发送了一个表情") {
+            if value.contains(WeChatMarkers.sentSticker) {
                 msg = msg.with(imageFrame: findFirstImageFrame(row, depth: 0))
-            } else if value.contains("发送了一个图片") {
+            } else if value.contains(WeChatMarkers.sentImage) {
                 // 图片：通常无子 AXImage，截承载该文本的叶子(或整行)的 frame。
                 let f = firstNonEmptyValueFrame(in: row, depth: 0) ?? frame(of: row)
                 msg = msg.with(imageFrame: f)

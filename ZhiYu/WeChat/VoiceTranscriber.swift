@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import ZhiYuCore
 
 /// 自动"语音转文字"：把右侧会话面板里**最近、未转文字**的语音气泡触发转文字并等到转写落地。
 /// 机制（已探测确认）：对气泡 `AXShowMenu` 弹右键菜单 → 找标题=「转文字」的 enabled `AXMenuItem` → `AXPress`。
@@ -111,7 +112,7 @@ enum VoiceTranscriber {
     /// 气泡是否已完成转写：bestText 含「已转文字」，或不再是「发送了一个语音」占位。
     private static func isTranscribed(_ bubble: AXUIElement) -> Bool {
         guard let t = WeChatAXProbe.bestText(bubble) else { return true }
-        return t.contains("已转文字") || !t.contains("发送了一个语音")
+        return t.contains(WeChatMarkers.converted) || !t.contains(WeChatMarkers.sentVoice)
     }
 
     /// 廉价地等"指定菜单元素"关闭：只查这一个元素是否还是 AXMenu（单元素、~毫秒级），
@@ -146,7 +147,7 @@ enum VoiceTranscriber {
         func walk(_ el: AXUIElement, _ d: Int) {
             if n > 9000 || d > 55 { return }
             n += 1
-            if let t = WeChatAXProbe.bestText(el), t.contains("发送了一个语音"), !t.contains("已转文字") {
+            if let t = WeChatAXProbe.bestText(el), t.contains(WeChatMarkers.sentVoice), !t.contains(WeChatMarkers.converted) {
                 out.append(el)
             }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1) }
