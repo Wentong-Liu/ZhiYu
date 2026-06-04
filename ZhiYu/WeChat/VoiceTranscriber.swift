@@ -73,33 +73,38 @@ enum VoiceTranscriber {
     private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
         guard actions(bubble).contains("AXShowMenu") else { return false }
         // 弹菜单前先确保无残留菜单，避免本条 AXShowMenu 命中旧菜单。
-        await waitMenuDismissed(panel: panel, appEl: appEl)
+        await waitMenuDismissed(panel: panel)
         AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
 
-        // 0.6s 窗口内持续轮询（步进 25ms），等「转文字」项出现。
+        // 0.6s 窗口内持续轮询（步进 20ms），等「转文字」项出现。热路径只查右面板（瞬时）。
         var target: AXUIElement?
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.6 {
             if Task.isCancelled { return false }  // ESC 已取消：放弃本条触发
-            if let menu = findMenu(panel: panel, appEl: appEl), let it = transcribeItem(in: menu) {
+            if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) {
                 target = it
                 break
             }
-            try? await Task.sleep(nanoseconds: 25_000_000)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        // 一次性全树兜底：右面板没找到时，才做一次慢但稳的全树深遍历（每条最多一次）。
+        if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) {
+            target = it
         }
 
         guard let target else {
             // 整个窗口都没等到「转文字」：兜底关掉此刻任何遗留菜单，再放弃这条。
-            if let stray = findMenu(panel: panel, appEl: appEl) {
+            if let stray = dfsMenu(panel) {
                 AXUIElementPerformAction(stray, "AXCancel" as CFString)
-                await waitMenuDismissed(panel: panel, appEl: appEl)
+                await waitMenuDismissed(panel: panel)
             }
             return false
         }
 
         AXUIElementPerformAction(target, "AXPress" as CFString)  // 选中即关菜单并开始转写（服务器异步转）
         // AXPress 后也等菜单收起（短超时），避免下一条 AXShowMenu 命中本条还没收起的旧菜单。
-        await waitMenuDismissed(panel: panel, appEl: appEl)
+        await waitMenuDismissed(panel: panel)
         return true
     }
 
@@ -109,14 +114,14 @@ enum VoiceTranscriber {
         return t.contains("已转文字") || !t.contains("发送了一个语音")
     }
 
-    /// 轮询直到全 app 内已无 AXMenu（菜单收起）或 ~0.35s 超时；步进 25ms。
-    /// 只等菜单关闭，不等转写结果，整体仍是「快速点过去」的策略。
-    private static func waitMenuDismissed(panel: AXUIElement, appEl: AXUIElement) async {
+    /// 轮询直到右面板内已无 AXMenu（菜单收起）或 ~0.35s 超时；步进 20ms。
+    /// 只查右面板（瞬时），不再做全树扫描；只等菜单关闭，不等转写结果，整体仍是「快速点过去」的策略。
+    private static func waitMenuDismissed(panel: AXUIElement) async {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < 0.35 {
             if Task.isCancelled { return }  // ESC 已取消：停止等待菜单收起
-            if findMenu(panel: panel, appEl: appEl) == nil { return }
-            try? await Task.sleep(nanoseconds: 25_000_000)
+            if dfsMenu(panel) == nil { return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
     }
 
@@ -149,11 +154,7 @@ enum VoiceTranscriber {
         return out
     }
 
-    /// 优先在右侧消息面板里找菜单（菜单就在消息表内，瞬时）；找不到再退回全树兜底（慢但稳）。
-    private static func findMenu(panel: AXUIElement, appEl: AXUIElement) -> AXUIElement? {
-        if let m = dfsMenu(panel) { return m }
-        return dfsMenu(appEl)
-    }
+    /// 在给定子树里深遍历找第一个 AXMenu。热路径传右面板（瞬时）；全树兜底传 appEl（慢但稳，每条最多一次）。
     private static func dfsMenu(_ root: AXUIElement) -> AXUIElement? {
         var result: AXUIElement?
         var n = 0
