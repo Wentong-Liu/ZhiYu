@@ -17,8 +17,8 @@ final class CandidatePanelModel: ObservableObject {
 
 struct CandidatePanelView: View {
     /// 卡片四周的透明外边距：给阴影留出渲染空间，避免在直角透明窗口的四角被裁成色块。
-    /// 控制器据此补偿定位与高度，所以面板视觉位置不变。
-    static let shadowPad: CGFloat = 28
+    /// 控制器据此补偿定位与高度，所以面板视觉位置不变。需 ≥ 阴影外扩范围(radius+|y|)。
+    static let shadowPad: CGFloat = 20
 
     @ObservedObject var model: CandidatePanelModel
     @State private var appeared = false
@@ -45,7 +45,7 @@ struct CandidatePanelView: View {
                 )
         )
         .environment(\.colorScheme, .dark)
-        .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
         .padding(Self.shadowPad)
         .onAppear {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { appeared = true }

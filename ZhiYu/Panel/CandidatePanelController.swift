@@ -20,6 +20,8 @@ final class CandidatePanelController: NSObject {
 
     /// 双击触发入口。
     func trigger() {
+        // 双击是键盘手势，鼠标"外部点击"监听不会关掉上一个面板；重复触发前先收掉残留面板/监听，避免两个面板层叠。
+        dismiss()
         // 只跑一次 AX 探针：上下文与输入框 frame 来自同一快照，避免两次遍历观察到不一致的会话状态。
         guard let snapshot = WeChatReader.readSnapshot(), !snapshot.context.messages.isEmpty,
               let frame = snapshot.composerFrame else {
