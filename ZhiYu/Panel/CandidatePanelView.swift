@@ -17,6 +17,8 @@ struct CandidatePanelView: View {
     @ObservedObject var model: CandidatePanelModel
     @State private var appeared = false
     @State private var hoverIndex: Int? = nil
+    var scrollable: Bool = false
+    var maxHeight: CGFloat = .greatestFiniteMagnitude
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -26,6 +28,7 @@ struct CandidatePanelView: View {
         }
         .padding(14)
         .frame(width: 440)
+        .frame(maxHeight: scrollable ? maxHeight : nil)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -63,10 +66,15 @@ struct CandidatePanelView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 10)
         } else {
-            VStack(spacing: 8) {
+            let list = VStack(spacing: 8) {
                 ForEach(Array(model.candidates.enumerated()), id: \.offset) { i, c in
                     card(index: i, text: c)
                 }
+            }
+            if scrollable {
+                ScrollView { list }
+            } else {
+                list
             }
         }
     }

@@ -45,40 +45,42 @@ final class CandidatePanelController: NSObject {
 
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
-        model.onSend = { [weak self] t in
-            Inserter.sendSequential(BubbleSplitter.split(t))
-            self?.dismiss()
-        }
+        model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
         model.onDismiss = { [weak self] in self?.dismiss() }
 
-        let hosting = NSHostingView(rootView: CandidatePanelView(model: model))
+        let screen = screenContaining(axPointTopLeft: CGPoint(x: axFrame.midX, y: axFrame.minY))
+            ?? NSScreen.main ?? NSScreen.screens.first
+        let vf = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let available = max(220, vf.height - 24)
+
+        // 1) 测自然内容高度（不滚动）
+        let measure = NSHostingView(rootView: CandidatePanelView(model: model, scrollable: false, maxHeight: .greatestFiniteMagnitude))
+        measure.layout()
+        let natural = measure.fittingSize
+        let width = max(natural.width, 440)
+        let needScroll = natural.height > available
+        let panelH = min(natural.height, available)
+
+        // 2) 实际 hosting：超高则滚动，固定高度 = panelH
+        let hosting = NSHostingView(rootView: CandidatePanelView(model: model, scrollable: needScroll, maxHeight: panelH))
+        hosting.frame = NSRect(x: 0, y: 0, width: width, height: panelH)
         hosting.layout()
-        let size = hosting.fittingSize
+        let size = NSSize(width: width, height: panelH)
 
         let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.level = .floating
         p.isOpaque = false
         p.backgroundColor = .clear
-        p.hasShadow = false   // 方形窗口阴影会在圆角处露出方角；改由 SwiftUI 圆角 .shadow 出阴影
+        p.hasShadow = false
         p.contentView = hosting
 
-        // 定位：找到 composer 所在屏幕，换算到 AppKit 坐标。
-        let screen = screenContaining(axPointTopLeft: CGPoint(x: axFrame.midX, y: axFrame.minY))
-            ?? NSScreen.main ?? NSScreen.screens.first
-        let screenHeight = screen?.frame.height ?? 1000
         var origin = PanelPositioning.panelOrigin(composerAXFrame: axFrame,
-                                                   screenHeight: screenHeight, gap: 8)
-        // 面板高度未知前用 fittingSize 估算后再夹到屏内
-        if let vf = screen?.visibleFrame {
-            origin.x = min(max(origin.x, vf.minX), vf.maxX - size.width)
-            origin.y = min(max(origin.y, vf.minY), vf.maxY - size.height)
-        }
+                                                  screenHeight: screen?.frame.height ?? 1000, gap: 8)
+        // size.height 已 <= available <= vf.height，夹取必落在屏内
+        origin.x = max(vf.minX, min(origin.x, vf.maxX - size.width))
+        origin.y = max(vf.minY, min(origin.y, vf.maxY - size.height))
         p.setFrameOrigin(origin)
-        // nonactivatingPanel：用 orderFrontRegardless 浮在前台但不抢微信焦点，保证后续发送生效。
-        // 不调 makeKey()：accessory app + nonactivating 下 key 状态不可靠，
-        // 既可能根本不成为 key（resignKey 永不触发、面板赖着不走），也可能因焦点抖动被误消失。
         p.orderFrontRegardless()
         self.panel = p
 
