@@ -30,7 +30,7 @@ public struct ReplyGenerator: Sendable {
         }
         let messages = PromptBuilder.build(context: context, style: style, candidateCount: candidateCount)
         let raw = try await provider.complete(messages: messages)
-        let candidates = CandidateParser.parse(raw, max: candidateCount)
+        let candidates = CandidateParser.parse(raw, max: candidateCount).map(HumanizeFilter.clean)
         let sticker = CandidateParser.parseSticker(raw)
         cache.store(candidates, forKey: key)
         cache.storeSticker(sticker, forKey: key)

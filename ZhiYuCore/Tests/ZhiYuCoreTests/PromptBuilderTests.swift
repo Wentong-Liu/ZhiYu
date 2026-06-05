@@ -16,9 +16,11 @@ private func sampleContext(draft: String = "") -> ChatContext {
     let msgs = PromptBuilder.build(context: sampleContext(), style: .humorous, candidateCount: 3)
     #expect(msgs.first?.role == .system)
     let sys = msgs.first?.content ?? ""
-    #expect(sys.contains("适度幽默"))      // 风格 instruction
+    #expect(sys.contains("带点梗和幽默"))   // 风格 instruction（幽默）
     #expect(sys.contains("3"))             // 候选数量
     #expect(sys.contains("对话所用语言"))   // 语言规则
+    #expect(sys.contains("像\"我\"本人随手打的"))  // 拟人化基础约束
+    #expect(sys.contains("客服"))          // 反客服腔约束
 }
 
 @Test func userMessageRendersConversationWithSpeakers() {

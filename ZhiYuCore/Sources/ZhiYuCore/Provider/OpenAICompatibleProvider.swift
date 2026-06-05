@@ -43,7 +43,7 @@ public struct OpenAICompatibleProvider: LLMProvider {
         for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
         let wire = messages.map { WireMessage(role: $0.role.rawValue, content: $0.content) }
         req.httpBody = try JSONEncoder().encode(
-            RequestBody(model: config.model, messages: wire, temperature: 0.8))
+            RequestBody(model: config.model, messages: wire, temperature: 0.9))
 
         let data: Data
         let response: URLResponse

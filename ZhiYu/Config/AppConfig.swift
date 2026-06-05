@@ -74,13 +74,15 @@ final class AppConfig {
     }
 
     /// 当前风格：styleIndex 落在预设范围内取预设，否则取自定义提示词。
+    /// 预设按 name 解析并兜底——存的索引/名字若不在新 presets 里，回退到默认「自然」，不崩。
     func currentStyle() -> ReplyStyle {
         let presets = ReplyStyle.presets
         if styleIndex >= presets.count {
             let p = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            return ReplyStyle.custom(p.isEmpty ? "用自然、得体、口语化的语气回复。" : p)
+            return ReplyStyle.custom(p.isEmpty ? "就用最自然随手的语气回复，别刻意。" : p)
         }
-        return presets[max(0, min(styleIndex, presets.count - 1))]
+        guard styleIndex >= 0, styleIndex < presets.count else { return .default }
+        return ReplyStyle.preset(named: presets[styleIndex].name)
     }
 
     /// 缓存区分用：Provider+模型 标签，如 "DeepSeek/deepseek-v4-flash"。
