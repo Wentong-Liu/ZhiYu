@@ -40,6 +40,12 @@ final class CandidatePanelController: NSObject {
 
     /// 双击触发：读当前会话快照并展示。
     func trigger() {
+        // 未授予辅助功能权限时：弹系统授权提示并打开系统设置引导用户授权，不再静默 beep。
+        guard AccessibilityAuthorizer.isTrusted else {
+            AccessibilityAuthorizer.promptIfNeeded()
+            AccessibilityAuthorizer.openSettings()
+            return
+        }
         // 只跑一次 AX 探针：上下文与输入框 frame 来自同一快照，避免两次遍历观察到不一致的会话状态。
         guard let snapshot = WeChatReader.readSnapshot() else { NSSound.beep(); return }
         present(snapshot: snapshot)
