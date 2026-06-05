@@ -47,6 +47,6 @@ struct MenuBarContent: View {
             openWindow(id: "settings")
         }
         Divider()
-        Button("退出知语") { NSApplication.shared.terminate(nil) }
+        Button("退出") { NSApplication.shared.terminate(nil) }
     }
 }
