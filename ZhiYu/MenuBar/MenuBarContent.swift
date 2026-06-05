@@ -1,4 +1,16 @@
 import SwiftUI
+import AppKit
+
+private func statusDot(_ color: NSColor) -> NSImage {
+    let size = NSSize(width: 9, height: 9)
+    let image = NSImage(size: size)
+    image.lockFocus()
+    color.setFill()
+    NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)).fill()
+    image.unlockFocus()
+    image.isTemplate = false
+    return image
+}
 
 struct MenuBarContent: View {
     @Environment(\.openWindow) private var openWindow
@@ -15,8 +27,8 @@ struct MenuBarContent: View {
             Label {
                 Text(AccessibilityAuthorizer.isTrusted ? "辅助功能：已授权" : "辅助功能：去授权…")
             } icon: {
-                Image(systemName: "circle.fill")
-                    .foregroundStyle(AccessibilityAuthorizer.isTrusted ? Color.green : Color.secondary)
+                Image(nsImage: statusDot(AccessibilityAuthorizer.isTrusted ? .systemGreen : .systemGray))
+                    .renderingMode(.original)
             }
         }
         Button {
@@ -26,8 +38,8 @@ struct MenuBarContent: View {
             Label {
                 Text(ScreenRecordingAuthorizer.isTrusted ? "屏幕录制：已授权" : "屏幕录制：去授权…（识图需要）")
             } icon: {
-                Image(systemName: "circle.fill")
-                    .foregroundStyle(ScreenRecordingAuthorizer.isTrusted ? Color.green : Color.secondary)
+                Image(nsImage: statusDot(ScreenRecordingAuthorizer.isTrusted ? .systemGreen : .systemGray))
+                    .renderingMode(.original)
             }
         }
         Button("设置") {
