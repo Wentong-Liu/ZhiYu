@@ -24,9 +24,9 @@ struct MenuBarContent: View {
                 AccessibilityAuthorizer.openSettings()
             }
         } label: {
-            Label {
-                Text(AccessibilityAuthorizer.isTrusted ? "辅助功能：已授权" : "辅助功能：去授权…")
-            } icon: {
+            HStack {
+                Text("辅助功能")
+                Spacer()
                 Image(nsImage: statusDot(AccessibilityAuthorizer.isTrusted ? .systemGreen : .systemGray))
                     .renderingMode(.original)
             }
@@ -35,9 +35,9 @@ struct MenuBarContent: View {
             if !ScreenRecordingAuthorizer.isTrusted { ScreenRecordingAuthorizer.request() }
             ScreenRecordingAuthorizer.openSettings()
         } label: {
-            Label {
-                Text(ScreenRecordingAuthorizer.isTrusted ? "屏幕录制：已授权" : "屏幕录制：去授权…（识图需要）")
-            } icon: {
+            HStack {
+                Text("屏幕录制")
+                Spacer()
                 Image(nsImage: statusDot(ScreenRecordingAuthorizer.isTrusted ? .systemGreen : .systemGray))
                     .renderingMode(.original)
             }
