@@ -7,6 +7,15 @@ enum InserterProbe {
     private static let keyCodeV: CGKeyCode = 9
     private static let keyCodeReturn: CGKeyCode = 36
 
+    // MARK: - 粘贴时序常量（值与抽取前完全一致）
+
+    /// 写入剪贴板并激活微信后、再 post ⌘V 之前的等待（秒）：给前台切换/焦点落定留时间。
+    private static let pasteKeyDelay: TimeInterval = 0.25
+    /// 恢复原剪贴板前每次轮询「粘贴是否已被消费」的间隔（秒）。
+    private static let clipboardRestoreRetryInterval: TimeInterval = 0.25
+    /// 恢复原剪贴板的最大重试次数：达到后即便未观测到 changeCount 变化也兜底恢复。
+    private static let clipboardRestoreMaxAttempts = 4
+
     /// 用 AX 直接把文本设进微信输入框。返回是否成功。
     /// 与探针读取口径一致：复用 collectEditables + pickComposer 定位底部消息输入框，
     /// 不再取 collect() 抓到的第一个可编辑元素（很可能是左上角搜索框）。
@@ -88,7 +97,7 @@ enum InserterProbe {
         WeChatAXProbe.findWeChatApp()?.activate()
         // 记录粘贴前的 changeCount，恢复前确认粘贴已被消费，降低 ⌘V 粘到旧内容 / 过早恢复的竞态。
         let changeCountBeforePaste = pb.changeCount
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + pasteKeyDelay) {
             postKey(keyCodeV, flags: .maskCommand)     // 'v'
             restoreSnapshotWhenSafe(saved, into: pb, pasteWriteChangeCount: changeCountBeforePaste)
             completion?()
@@ -100,9 +109,9 @@ enum InserterProbe {
                                                 into pb: NSPasteboard,
                                                 pasteWriteChangeCount: Int,
                                                 attempt: Int = 0) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreRetryInterval) {
             // changeCount 变化或重试上限到达后再恢复：尽量保证 ⌘V 已读取我们写入的内容。
-            if pb.changeCount != pasteWriteChangeCount || attempt >= 4 {
+            if pb.changeCount != pasteWriteChangeCount || attempt >= clipboardRestoreMaxAttempts {
                 restore(saved, into: pb)
             } else {
                 restoreSnapshotWhenSafe(saved, into: pb,

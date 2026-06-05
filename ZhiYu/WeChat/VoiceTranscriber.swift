@@ -10,6 +10,31 @@ enum VoiceTranscriber {
     /// 并发护栏：避免两处（如 prewarm + present）同时驱动右键菜单互相打架。
     private static var isRunning = false
 
+    // MARK: - 启发式时序常量（值与抽取前完全一致）
+
+    /// `AXShowMenu` 动作返回耗时（毫秒）的采样判定阈值：
+    /// 被微信短暂拒绝时动作约 ~1ms 立即返回；被接受时约 ~50ms（消息超时后）返回。
+    /// 故以 30ms 为界：低于此值视为「被拒、菜单没弹」→ 稍等重试；高于此值视为「已接受」→ 短轮询等菜单进 AX 树。
+    private static let axShowMenuRejectedMs: Double = 30
+    /// 对单个 AX 元素查询的消息超时（秒）：避免对已失效/慢响应元素的查询长时间阻塞。
+    private static let axMessagingTimeout: TimeInterval = 0.05
+    /// 单条气泡触发转文字的整体截止时长（秒）：超过则放弃该条。
+    private static let triggerOverallTimeout: TimeInterval = 1.6
+    /// 「已接受但菜单尚未进 AX 树」时等菜单出现的短轮询窗口（秒）。
+    private static let menuAppearPollWindow: TimeInterval = 0.3
+    /// 等「指定菜单元素」关闭的最长等待（秒）。
+    private static let menuClosePollWindow: TimeInterval = 0.3
+    /// 并发护栏等待 / `AXShowMenu` 被拒后重试的步进（纳秒，100ms）。
+    private static let retryStepNanos: UInt64 = 100_000_000
+    /// 等转写落地的轮询步进（纳秒，300ms）。
+    private static let transcribePollStepNanos: UInt64 = 300_000_000
+    /// 菜单出现短轮询的步进（纳秒，20ms）。
+    private static let menuAppearStepNanos: UInt64 = 20_000_000
+    /// 一轮触发未拿到菜单后、进入下一轮前的退避（纳秒，80ms）。
+    private static let triggerRoundBackoffNanos: UInt64 = 80_000_000
+    /// 等菜单关闭轮询的步进（纳秒，15ms）。
+    private static let menuCloseStepNanos: UInt64 = 15_000_000
+
     /// 触发"最近最多 `max` 条"未转语音的转文字，并**等到这些气泡都转写落地或 `timeout` 超时再返回**。
     /// - 取未转语音（新→旧），只取最前 `max` 条（我的 + 对方的合计）。
     /// - 逐条快速触发；触发完毕后轮询气泡文本，确认转写完成（出现「已转文字」或不再是「发送了一个语音」）。
@@ -19,7 +44,7 @@ enum VoiceTranscriber {
             let start = ProcessInfo.processInfo.systemUptime
             while isRunning, ProcessInfo.processInfo.systemUptime - start < timeout {
                 if Task.isCancelled { return }  // ESC 已取消：不再等待
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                try? await Task.sleep(nanoseconds: retryStepNanos)
             }
             return
         }
@@ -51,7 +76,7 @@ enum VoiceTranscriber {
         while ProcessInfo.processInfo.systemUptime < deadline {
             if Task.isCancelled { return }  // ESC 已取消：停止等待转写落地
             if pressed.allSatisfy(isTranscribed) { break }
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(nanoseconds: transcribePollStepNanos)
         }
         NSLog("[VoiceTranscriber] 触发转文字 %d/%d 条，等待转写落地完成", pressed.count, targets.count)
     }
@@ -71,28 +96,28 @@ enum VoiceTranscriber {
         var target: AXUIElement?
         var foundMenu: AXUIElement?
         let tStart = ProcessInfo.processInfo.systemUptime
-        let overallDeadline = tStart + 1.6
+        let overallDeadline = tStart + triggerOverallTimeout
         while ProcessInfo.processInfo.systemUptime < overallDeadline, target == nil {
             if Task.isCancelled { return false }
-            AXUIElementSetMessagingTimeout(bubble, 0.05)
+            AXUIElementSetMessagingTimeout(bubble, Float(axMessagingTimeout))
             let tShow = ProcessInfo.processInfo.systemUptime
             AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
             let showMs = (ProcessInfo.processInfo.systemUptime - tShow) * 1000
             // 动作刚返回，先廉价查一下菜单是否已出现（兼顾"接受且极快渲染"的情况，避免误重试）。
             if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) { target = it; foundMenu = menu; break }
-            if showMs < 30 {
+            if showMs < axShowMenuRejectedMs {
                 // ~1ms 立即返回 = 被微信短暂拒绝、菜单没弹 → 稍等直接重试 AXShowMenu，不空轮询。
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                try? await Task.sleep(nanoseconds: retryStepNanos)
                 continue
             }
             // 已接受(~50ms 超时返回)但菜单尚未进 AX 树 → 短轮询等它出现。
-            let pollEnd = ProcessInfo.processInfo.systemUptime + 0.3
+            let pollEnd = ProcessInfo.processInfo.systemUptime + menuAppearPollWindow
             while ProcessInfo.processInfo.systemUptime < pollEnd {
                 if Task.isCancelled { return false }
                 if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) { target = it; foundMenu = menu; break }
-                try? await Task.sleep(nanoseconds: 20_000_000)
+                try? await Task.sleep(nanoseconds: menuAppearStepNanos)
             }
-            if target == nil { try? await Task.sleep(nanoseconds: 80_000_000) }
+            if target == nil { try? await Task.sleep(nanoseconds: triggerRoundBackoffNanos) }
         }
         if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) { target = it; foundMenu = menu }
         guard let target else {
@@ -116,12 +141,12 @@ enum VoiceTranscriber {
     /// 廉价地等"指定菜单元素"关闭：只查这一个元素是否还是 AXMenu（单元素、~毫秒级），
     /// 并给它设 50ms 消息超时，避免对已失效元素的查询阻塞。最多等 0.3s。
     private static func waitMenuClosed(_ menu: AXUIElement) async {
-        AXUIElementSetMessagingTimeout(menu, 0.05)
+        AXUIElementSetMessagingTimeout(menu, Float(axMessagingTimeout))
         let start = ProcessInfo.processInfo.systemUptime
-        while ProcessInfo.processInfo.systemUptime - start < 0.3 {
+        while ProcessInfo.processInfo.systemUptime - start < menuClosePollWindow {
             if Task.isCancelled { return }
             if WeChatAXProbe.role(menu) != "AXMenu" { return }  // 元素已失效/不再是菜单 = 已关
-            try? await Task.sleep(nanoseconds: 15_000_000)
+            try? await Task.sleep(nanoseconds: menuCloseStepNanos)
         }
     }
 

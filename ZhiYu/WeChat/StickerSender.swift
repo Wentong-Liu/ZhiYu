@@ -6,6 +6,31 @@ import ApplicationServices
 /// 任一步超时则 beep 并中止（不会乱发）。除 🔍 一处坐标点击外全用 AX 动作；坐标运行时从 AX 读取。
 @MainActor
 enum StickerSender {
+    // MARK: - 启发式几何/时序常量（值与抽取前完全一致）
+
+    /// 底部工具栏(🔍/😀/❤️/表情包 那条)的最大高度（点）：用于从诸多 AXScrollArea 中筛出矮条工具栏。
+    private static let toolbarMaxHeight: CGFloat = 80
+    /// 工具栏「横向铺满」判定占 popover 宽度的最小比例：宽度 ≥ popover 宽 × 此值，排除窄 Tab 条。
+    private static let toolbarWidthFraction: CGFloat = 0.5
+    /// 搜索结果格的最小宽/高（点）：小于此尺寸的 AXStaticText 不视为表情结果（排除 Tab/搜索中态）。
+    private static let resultCellMinSize: CGFloat = 60
+
+    /// 等表情面板(popover)出现的轮询超时（秒）。
+    private static let popoverPollTimeout: TimeInterval = 2.0
+    /// 等进入搜索框的轮询超时（秒）。
+    private static let searchFieldPollTimeout: TimeInterval = 1.6
+    /// 等搜索结果首次出现的轮询超时（秒）。
+    private static let resultPollTimeout: TimeInterval = 3.5
+    /// 结果稳定后重定位首个结果格的轮询超时（秒）。
+    private static let resultRelocatePollTimeout: TimeInterval = 0.6
+
+    /// 点 🔍 前等面板布局稳定再读其 frame 的延时（纳秒，80ms）。
+    private static let layoutSettleNanos: UInt64 = 80_000_000
+    /// 让结果网格排序稳定、再重定位首格的延时（纳秒，250ms）。
+    private static let resultGridSettleNanos: UInt64 = 250_000_000
+    /// poll() 的轮询步进（纳秒，60ms，更跟手）。
+    private static let pollStepNanos: UInt64 = 60_000_000
+
     static func send(keyword: String) {
         let kw = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !kw.isEmpty else { return }
@@ -26,31 +51,31 @@ enum StickerSender {
         AXUIElementPerformAction(emojiBtn, "AXPress" as CFString)
 
         // 2) 等 popover（app 顶层浅查，避免 DFS 扎进左侧巨表导致误返回 nil/变慢）。
-        guard let popover = await poll(timeout: 2.0, { findPopoverShallow(appEl) ?? findRole("AXPopover", in: appEl) })
+        guard let popover = await poll(timeout: popoverPollTimeout, { findPopoverShallow(appEl) ?? findRole("AXPopover", in: appEl) })
         else { fail("表情面板(popover)未出现"); return false }
 
         // 3) 进搜索：🔍 无 AX 动作（只是无标签 AXImage），只能坐标点。
         //    搜索框已在(面板记住搜索态)则跳过；否则等面板布局稳定后直接坐标点 🔍——不再做无谓的 AXPress + 轮询等待。
         if searchField(in: popover) == nil {
-            try? await Task.sleep(nanoseconds: 80_000_000)  // 等面板布局稳定再读 🔍 frame
+            try? await Task.sleep(nanoseconds: layoutSettleNanos)  // 等面板布局稳定再读 🔍 frame
             if let first = bottomToolbarFirstItem(in: popover), let f = WeChatAXProbe.frame(of: first) {
                 clickAt(CGPoint(x: f.midX, y: f.midY))
             } else {
                 NSLog("[StickerSender] 警告：未定位到底部工具栏🔍项")
             }
         }
-        guard let field = await poll(timeout: 1.6, { searchField(in: popover) }) else { fail("未进入表情搜索框"); return false }
+        guard let field = await poll(timeout: searchFieldPollTimeout, { searchField(in: popover) }) else { fail("未进入表情搜索框"); return false }
 
         // 4) 写关键词 + 回车。
         AXUIElementSetAttributeValue(field, "AXValue" as CFString, keyword as CFString)
         AXUIElementPerformAction(field, "AXConfirm" as CFString)
 
         // 5) 轮询结果（有 Press 且 ≥60×60，排除 Tab/搜索中），稳定后重定位取最靠左上的第一个，AXPress。
-        guard await poll(timeout: 3.5, { firstResultCell(in: popover) }) != nil
+        guard await poll(timeout: resultPollTimeout, { firstResultCell(in: popover) }) != nil
         else { fail("未搜到「\(keyword)」的表情结果"); return false }
-        try? await Task.sleep(nanoseconds: 250_000_000)  // 让结果网格排序稳定
+        try? await Task.sleep(nanoseconds: resultGridSettleNanos)  // 让结果网格排序稳定
         // 不复用首次句柄（结果可能整体重建而失效），稳定后重新定位。
-        guard let target = await poll(timeout: 0.6, { firstResultCell(in: popover) }) else { fail("结果重定位失败"); return false }
+        guard let target = await poll(timeout: resultRelocatePollTimeout, { firstResultCell(in: popover) }) else { fail("结果重定位失败"); return false }
         AXUIElementPerformAction(target, "AXPress" as CFString)
         NSLog("[StickerSender] 已 AXPress 第一个结果，关键词=%@", keyword)
         return true
@@ -74,7 +99,7 @@ enum StickerSender {
         let toolbar = scrolls
             .filter {
                 guard let f = WeChatAXProbe.frame(of: $0) else { return false }
-                return f.height <= 80 && (popW <= 0 || f.width >= popW * 0.5)
+                return f.height <= toolbarMaxHeight && (popW <= 0 || f.width >= popW * toolbarWidthFraction)
             }
             .max(by: { (WeChatAXProbe.frame(of: $0)?.minY ?? -1) < (WeChatAXProbe.frame(of: $1)?.minY ?? -1) })
         guard let toolbar else { return nil }
@@ -91,7 +116,7 @@ enum StickerSender {
         var cells: [AXUIElement] = []
         collectMatching(in: popover, into: &cells) { el in
             guard WeChatAXProbe.role(el) == "AXStaticText",
-                  let f = WeChatAXProbe.frame(of: el), f.width >= 60, f.height >= 60 else { return false }
+                  let f = WeChatAXProbe.frame(of: el), f.width >= resultCellMinSize, f.height >= resultCellMinSize else { return false }
             return WeChatAXProbe.actions(el).contains("AXPress")
         }
         // 排序前把 (element, frame) 物化为快照：sort 闭包不再二次读 AX、不再 force-unwrap。
@@ -154,7 +179,7 @@ enum StickerSender {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < timeout {
             if let v = probe() { return v }
-            try? await Task.sleep(nanoseconds: 60_000_000)
+            try? await Task.sleep(nanoseconds: pollStepNanos)
         }
         return probe()
     }
