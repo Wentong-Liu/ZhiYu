@@ -22,6 +22,10 @@ final class CandidatePanelController: NSObject {
     private static let manualOffsetKey = "ZhiYu.panelManualOffset"
     private var manualOffset: CGSize
 
+    /// 上次成功展示时的 composer AX 锚点（持久化到 UserDefaults，存 [minX, minY, width, height]）。
+    /// 让"先弹后读"在每次启动后的第一次 trigger 也能立即弹；仅全新安装从未弹过时为 .zero（走同步兜底）。
+    private static let anchorKey = "ZhiYu.lastAnchorAXFrame"
+
     private var panel: NSPanel?
     private var anchorAXFrame: CGRect = .zero
     private let model = CandidatePanelModel()
@@ -51,9 +55,13 @@ final class CandidatePanelController: NSObject {
             manualOffset = .zero
         }
         super.init()
+        // 读上次成功展示的 composer AX 锚点（[minX, minY, width, height]）：让启动后第一次 trigger 也能"先弹后读"。
+        if let arr = UserDefaults.standard.array(forKey: Self.anchorKey) as? [Double], arr.count == 4 {
+            anchorAXFrame = CGRect(x: arr[0], y: arr[1], width: arr[2], height: arr[3])
+        }
     }
 
-    /// 双击触发：读当前会话快照并展示。
+    /// 双击触发：用上次锚点立即弹加载面板，再在下一个 runloop 异步读会话→重定位→生成（先弹后读，消除可感延迟）。
     func trigger() {
         // 未授予辅助功能权限时：弹系统授权提示并打开系统设置引导用户授权，不再静默 beep。
         guard AccessibilityAuthorizer.isTrusted else {
@@ -61,20 +69,43 @@ final class CandidatePanelController: NSObject {
             AccessibilityAuthorizer.openSettings()
             return
         }
-        // 只跑一次 AX 探针：上下文与输入框 frame 来自同一快照，避免两次遍历观察到不一致的会话状态。
-        guard let snapshot = WeChatReader.readSnapshot() else { NSSound.beep(); return }
-        present(snapshot: snapshot)
+        // 本机从未成功弹过、无可用锚点：退回"先读后弹"仅此一次（读到的 composer frame 即成首个锚点）。
+        guard anchorAXFrame != .zero else {
+            guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty, snap.composerFrame != nil else { NSSound.beep(); return }
+            present(snapshot: snap)
+            return
+        }
+        // 先用上次锚点立即弹出加载面板，再在下一个 runloop 异步读会话。
+        let generation = beginPresentation(anchor: anchorAXFrame)
+        // 关键：必须 DispatchQueue.main.async（不能同步调用 readSnapshot）——这样加载面板会在阻塞式 readSnapshot 之前先完成绘制，即"立即弹出"。
+        DispatchQueue.main.async { [weak self] in
+            guard let self, generation == self.presentGeneration else { return }
+            let t0 = Date()
+            guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty, let frame = snap.composerFrame else { self.dismiss(); NSSound.beep(); return }
+            NSLog("[ZhiYu] trigger readSnapshot %.0fms", Date().timeIntervalSince(t0) * 1000)
+            self.anchorAXFrame = frame
+            self.persistAnchor(frame)
+            self.relayout()  // 读到真实 composer frame 后按其重定位（锚点可能与上次不同）
+            self.lastSeenSig[snap.context.contactName] = MessageSignal.signature(snap.context)
+            self.runGeneration(baseContext: snap.context, imageFrames: snap.imageFrames, style: AppConfig.shared.currentStyle(), generation: generation)
+        }
     }
 
-    /// 用给定快照展示候选面板（手动/自动共用）。
+    /// 用给定快照展示候选面板（自动路径继续用）：薄封装，行为与改动前等价。
     private func present(snapshot: WeChatReader.Snapshot) {
         guard !snapshot.context.messages.isEmpty, let frame = snapshot.composerFrame else { NSSound.beep(); return }
+        let g = beginPresentation(anchor: frame)
+        persistAnchor(frame)
+        lastSeenSig[snapshot.context.contactName] = MessageSignal.signature(snapshot.context)  // 标记已展示
+        runGeneration(baseContext: snapshot.context, imageFrames: snapshot.imageFrames, style: AppConfig.shared.currentStyle(), generation: g)
+    }
+
+    /// present 的公共起手：收残留→进 busy→自增代际→复位 model 到加载态→用给定锚点建面板→取消在飞旧任务。
+    /// 返回自增后的 presentGeneration（generation token），供后续异步读会话/生成时识别陈旧。
+    private func beginPresentation(anchor: CGRect) -> Int {
         dismiss()  // 重复展示前先收掉残留面板/监听，避免层叠
         isBusy = true
         presentGeneration += 1
-        let generation = presentGeneration
-        var baseContext = snapshot.context
-        var imageFrames = snapshot.imageFrames
         // 先复位到加载态再建面板：面板按"加载态"测高，内容到位后再 relayout，避免沿用上次内容的尺寸。
         model.isLoading = true
         model.loadingNote = "生成中…"
@@ -82,10 +113,15 @@ final class CandidatePanelController: NSObject {
         model.stickerKeyword = nil
         model.status = ""
         model.providerLabel = AppConfig.shared.providerLabel
-        lastSeenSig[snapshot.context.contactName] = MessageSignal.signature(snapshot.context)  // 标记已展示
-        showPanel(anchorAXFrame: frame)
-        let style = AppConfig.shared.currentStyle()
+        showPanel(anchorAXFrame: anchor)
         currentTask?.cancel()  // 取代在飞的旧任务（其转写循环会响应取消立即停）
+        return presentGeneration
+    }
+
+    /// 在飞的生成任务：语音转写→截图→生成→写回 model→relayout→复位 isBusy（含陈旧判定与错误文案）。
+    private func runGeneration(baseContext: ChatContext, imageFrames: [CGRect], style: ReplyStyle, generation: Int) {
+        var baseContext = baseContext
+        var imageFrames = imageFrames
         currentTask = Task {
             do {
                 // 若会话里有"未转文字"的语音 → 取最近 5 条触发转写并等到完成，转写回来后重读。
@@ -277,6 +313,11 @@ final class CandidatePanelController: NSObject {
     /// 持久化手动偏移到 UserDefaults（[Δx, Δy]）。
     private func saveManualOffset() {
         UserDefaults.standard.set([Double(manualOffset.width), Double(manualOffset.height)], forKey: Self.manualOffsetKey)
+    }
+
+    /// 持久化 composer AX 锚点到 UserDefaults（[minX, minY, width, height]）：供启动后第一次 trigger 立即弹。
+    private func persistAnchor(_ f: CGRect) {
+        UserDefaults.standard.set([Double(f.minX), Double(f.minY), Double(f.width), Double(f.height)], forKey: Self.anchorKey)
     }
 
     /// 面板存活期间的键盘处理：
