@@ -39,9 +39,22 @@ struct PanelDragHandle: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             if event.clickCount >= 2 { onReset(); return }  // 双击：重置回自动位置
+            guard let window = self.window else { return }
             NSCursor.closedHand.set()
-            window?.performDrag(with: event)  // 同步阻塞到松手；无边框拖动、不激活窗口
-            onMoved()                         // 松手后记录新位置→换算偏移持久化
+            let startMouse = NSEvent.mouseLocation          // 屏幕全局坐标
+            let startOrigin = window.frame.origin
+            var moved = false
+            // 自己抽干拖拽事件直接挪窗口（不经 performDrag/SwiftUI 分发，对非激活无边框面板必定生效）
+            while let e = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp],
+                                          until: .distantFuture, inMode: .eventTracking, dequeue: true) {
+                if e.type == .leftMouseUp { break }
+                let now = NSEvent.mouseLocation
+                window.setFrameOrigin(NSPoint(x: startOrigin.x + (now.x - startMouse.x),
+                                              y: startOrigin.y + (now.y - startMouse.y)))
+                moved = true
+            }
+            NSCursor.openHand.set()
+            if moved { onMoved() }                          // 仅真正拖动过才记偏移，纯点击不触发
         }
 
         // 鼠标在把手上时显示手型；拖动结束/移出时恢复箭头。
