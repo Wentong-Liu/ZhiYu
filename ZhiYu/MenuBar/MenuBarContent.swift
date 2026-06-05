@@ -4,7 +4,7 @@ struct MenuBarContent: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button(AccessibilityAuthorizer.isTrusted ? "辅助功能：已授权 ✓" : "辅助功能：去授权…") {
+        Button(AccessibilityAuthorizer.isTrusted ? "辅助功能：已授权 🟢" : "辅助功能：去授权…") {
             if AccessibilityAuthorizer.isTrusted {
                 AccessibilityAuthorizer.openSettings()
             } else {
@@ -12,11 +12,11 @@ struct MenuBarContent: View {
                 AccessibilityAuthorizer.openSettings()
             }
         }
-        Button(ScreenRecordingAuthorizer.isTrusted ? "屏幕录制：已授权 ✓" : "屏幕录制：去授权…（识图需要）") {
+        Button(ScreenRecordingAuthorizer.isTrusted ? "屏幕录制：已授权 🟢" : "屏幕录制：去授权…（识图需要）") {
             if !ScreenRecordingAuthorizer.isTrusted { ScreenRecordingAuthorizer.request() }
             ScreenRecordingAuthorizer.openSettings()
         }
-        Button("知语设置…") {
+        Button("设置") {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "settings")
         }
