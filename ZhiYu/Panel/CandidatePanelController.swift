@@ -291,6 +291,8 @@ final class CandidatePanelController: NSObject {
                 return "失败：未配置 API Key"
             case .network:
                 return "失败：网络连接异常"
+            case .streamFailed:
+                return "失败：响应流异常（请稍后重试）"
             case .invalidResponse:
                 return "失败：响应解析异常"
             case .httpError(let status, _):

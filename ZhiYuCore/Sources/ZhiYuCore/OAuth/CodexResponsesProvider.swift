@@ -9,6 +9,11 @@ public struct CodexResponsesProvider: LLMProvider {
     private let userAgent: String
     private let session: URLSession
 
+    /// 单次请求的连接/响应超时（秒）。
+    private static let requestTimeout: TimeInterval = 60
+    /// SSE 读取循环的整体上限（秒）：超过则判定流卡死并失败，避免无限挂起。
+    private static let maxStreamSeconds: TimeInterval = 90
+
     public init(accessToken: String, accountId: String, model: String,
                 userAgent: String = "\(ChatGPTOAuth.originator) (macOS)", session: URLSession = .shared) {
         self.accessToken = accessToken
@@ -45,6 +50,7 @@ public struct CodexResponsesProvider: LLMProvider {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = Self.requestTimeout
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
         req.setValue(ChatGPTOAuth.originator, forHTTPHeaderField: "originator")
@@ -60,16 +66,20 @@ public struct CodexResponsesProvider: LLMProvider {
         } catch {
             throw ProviderError.network(error.localizedDescription)
         }
-        guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            // 读尽剩余 body 供报错
-            var errText = ""
-            for try await line in bytes.lines { errText += line }
-            throw ProviderError.httpError(status: http.statusCode, body: errText)
+        let http = try HTTPResponseValidator.httpResponse(from: response)
+        if !HTTPResponseValidator.successRange.contains(http.statusCode) {
+            // 读尽剩余 body 供报错（按换行 join，保留各行边界）。
+            var errLines: [String] = []
+            for try await line in bytes.lines { errLines.append(line) }
+            try HTTPResponseValidator.throwIfHTTPError(http, body: errLines.joined(separator: "\n"))
         }
 
         var text = ""
+        let start = ProcessInfo.processInfo.systemUptime
         for try await line in bytes.lines {
+            if ProcessInfo.processInfo.systemUptime - start > Self.maxStreamSeconds {
+                throw ProviderError.streamFailed(body: "stream timed out after \(Int(Self.maxStreamSeconds))s")
+            }
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
             if payload.isEmpty || payload == "[DONE]" { continue }
@@ -82,7 +92,7 @@ public struct CodexResponsesProvider: LLMProvider {
             case "response.completed", "response.done", "response.incomplete":
                 return text
             case "error", "response.failed":
-                throw ProviderError.httpError(status: 0, body: payload)
+                throw ProviderError.streamFailed(body: payload)
             default:
                 continue
             }

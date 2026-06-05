@@ -7,6 +7,9 @@ public struct OpenAICompatibleProvider: LLMProvider {
     private let session: URLSession
     private let extraHeaders: [String: String]
 
+    /// 单次请求超时（秒）。非流式 chat/completions 一次性返回，给足整体上限即可。
+    private static let requestTimeout: TimeInterval = 60
+
     public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared,
                 extraHeaders: [String: String] = [:]) {
         self.config = config
@@ -34,6 +37,7 @@ public struct OpenAICompatibleProvider: LLMProvider {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = Self.requestTimeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
@@ -48,11 +52,8 @@ public struct OpenAICompatibleProvider: LLMProvider {
         } catch {
             throw ProviderError.network(error.localizedDescription)
         }
-        guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            throw ProviderError.httpError(status: http.statusCode,
-                                          body: String(data: data, encoding: .utf8) ?? "")
-        }
+        let http = try HTTPResponseValidator.httpResponse(from: response)
+        try HTTPResponseValidator.throwIfHTTPError(http, body: String(data: data, encoding: .utf8) ?? "")
         guard let parsed = try? JSONDecoder().decode(ResponseBody.self, from: data),
               let content = parsed.choices.first?.message.content else {
             throw ProviderError.invalidResponse
