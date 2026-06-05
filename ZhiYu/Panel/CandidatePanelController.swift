@@ -61,7 +61,7 @@ final class CandidatePanelController: NSObject {
         }
     }
 
-    /// 双击触发：用上次锚点立即弹加载面板，再在下一个 runloop 异步读会话→重定位→生成（先弹后读，消除可感延迟）。
+    /// 双击触发：复用记住的面板位置立即弹加载面板，再在下一个 runloop 异步读会话→读回来只出候选不重定位→生成（先弹后读，消除可感延迟与跳动）。
     func trigger() {
         // 未授予辅助功能权限时：弹系统授权提示并打开系统设置引导用户授权，不再静默 beep。
         guard AccessibilityAuthorizer.isTrusted else {
@@ -81,11 +81,9 @@ final class CandidatePanelController: NSObject {
         DispatchQueue.main.async { [weak self] in
             guard let self, generation == self.presentGeneration else { return }
             let t0 = Date()
-            guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty, let frame = snap.composerFrame else { self.dismiss(); NSSound.beep(); return }
+            guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty else { self.dismiss(); NSSound.beep(); return }
             NSLog("[ZhiYu] trigger readSnapshot %.0fms", Date().timeIntervalSince(t0) * 1000)
-            self.anchorAXFrame = frame
-            self.persistAnchor(frame)
-            self.relayout()  // 读到真实 composer frame 后按其重定位（锚点可能与上次不同）
+            // 复用记住的位置：读回来只用于出候选，不重定位面板（避免跳动）。位置由首次读取确立、之后靠手动拖动调整。
             self.lastSeenSig[snap.context.contactName] = MessageSignal.signature(snap.context)
             self.runGeneration(baseContext: snap.context, imageFrames: snap.imageFrames, style: AppConfig.shared.currentStyle(), generation: generation)
         }
