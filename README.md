@@ -91,7 +91,3 @@
 ## 📄 License
 
 [MIT](LICENSE) © 2026 Wentong Liu
-
----
-
-<sub>高级 / 实验性：除 API Key 外，代码里还含一条"用 ChatGPT 订阅登录"的通路（Codex OAuth）。它依赖第三方协议、属灰色地带、随时可能失效，**不建议依赖、自负风险**，故不在文档中主推。</sub>
