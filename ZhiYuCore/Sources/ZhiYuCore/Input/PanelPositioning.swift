@@ -21,4 +21,21 @@ public enum PanelPositioning {
         let composerTopAppKit = primaryScreenHeight - composerAXFrame.minY
         return CGPoint(x: composerAXFrame.minX, y: composerTopAppKit + gap)
     }
+
+    /// 把"自动锚点 base + 用户手动偏移 offset"得到的原点，夹紧进可见区 `vf`（保证面板完整可见）。
+    /// 跟随微信窗口：base 由 composer frame 实时算出，offset 是用户拖动后持久化的相对量，相加即"跟随后的位置"。
+    /// 夹紧规则：x∈[vf.minX, vf.maxX - size.width]、y∈[vf.minY, vf.maxY - size.height]。
+    /// offset 为 .zero 时退化为对自动锚点本身做夹紧，与未引入手动偏移前的行为逐像素一致。
+    /// - Parameters:
+    ///   - base: 未夹紧的自动锚点（AppKit 全局左下原点）。
+    ///   - offset: 用户拖动后记录的相对偏移（width=Δx, height=Δy）。
+    ///   - size: 面板窗口尺寸（含 shadowPad）。
+    ///   - vf: 目标屏可见区（visibleFrame）。
+    /// - Returns: 夹紧后的面板左下角原点。
+    public static func clamped(origin base: CGPoint, offset: CGSize,
+                              size: CGSize, within vf: CGRect) -> CGPoint {
+        let x = max(vf.minX, min(base.x + offset.width, vf.maxX - size.width))
+        let y = max(vf.minY, min(base.y + offset.height, vf.maxY - size.height))
+        return CGPoint(x: x, y: y)
+    }
 }

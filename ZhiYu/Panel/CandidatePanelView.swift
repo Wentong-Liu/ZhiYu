@@ -14,6 +14,10 @@ final class CandidatePanelModel: ObservableObject {
     var onSend: (String) -> Void = { _ in }
     var onSendSticker: (String) -> Void = { _ in }
     var onDismiss: () -> Void = {}
+    /// 拖动把手松手后回调（控制器据此把面板位置换算成"相对自动锚点的偏移"并持久化）。
+    var onDragMoved: () -> Void = {}
+    /// 双击把手重置位置回调。
+    var onDragReset: () -> Void = {}
 }
 
 struct CandidatePanelView: View {
@@ -69,6 +73,8 @@ struct CandidatePanelView: View {
             Text("知语 · 候选回复").font(.headline).foregroundStyle(.white.opacity(0.92))
             Spacer()
         }
+        // 仅标题栏这一条作为拖动把手；候选卡片/发送/发表情按钮不受影响、照常可点。
+        .overlay(PanelDragHandle(onMoved: model.onDragMoved, onReset: model.onDragReset))
     }
 
     @ViewBuilder private var content: some View {

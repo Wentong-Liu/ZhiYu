@@ -17,6 +17,11 @@ final class CandidatePanelController: NSObject {
         static let screenMargin: CGFloat = 24
     }
 
+    /// 用户拖动后记录的"相对自动锚点的偏移"（跟随微信窗口：自动锚点实时算，叠加此偏移即最终位置）。
+    /// 持久化到 UserDefaults（存 [Double] 两元素）；双击把手或缺省为 .zero（退回纯自动定位）。
+    private static let manualOffsetKey = "ZhiYu.panelManualOffset"
+    private var manualOffset: CGSize
+
     private var panel: NSPanel?
     private var anchorAXFrame: CGRect = .zero
     private let model = CandidatePanelModel()
@@ -37,6 +42,16 @@ final class CandidatePanelController: NSObject {
     private var presentGeneration = 0
     /// 当前在飞的 present 任务：ESC/dismiss 时取消，让转写循环立即停、不再 AXShowMenu/把微信拉前台。
     private var currentTask: Task<Void, Never>?
+
+    override init() {
+        // 从 UserDefaults 读上次拖动后的手动偏移（[Δx, Δy]）；缺省/格式不符则回退 .zero（纯自动定位）。
+        if let arr = UserDefaults.standard.array(forKey: Self.manualOffsetKey) as? [Double], arr.count == 2 {
+            manualOffset = CGSize(width: arr[0], height: arr[1])
+        } else {
+            manualOffset = .zero
+        }
+        super.init()
+    }
 
     /// 双击触发：读当前会话快照并展示。
     func trigger() {
@@ -188,6 +203,20 @@ final class CandidatePanelController: NSObject {
         model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
         model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
         model.onDismiss = { [weak self] in self?.dismiss() }
+        // 拖动松手：把面板当前原点相对实时自动锚点的差值记为手动偏移并持久化（跟随微信窗口）。
+        model.onDragMoved = { [weak self] in
+            guard let self, let p = self.panel else { return }
+            let base = self.autoOrigin()
+            self.manualOffset = CGSize(width: p.frame.origin.x - base.x, height: p.frame.origin.y - base.y)
+            self.saveManualOffset()
+        }
+        // 双击把手：清零偏移并立即重定位回自动锚点。
+        model.onDragReset = { [weak self] in
+            guard let self else { return }
+            self.manualOffset = .zero
+            self.saveManualOffset()
+            self.relayout()
+        }
 
         let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: CandidatePanelView.baseWidth, height: 120),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -229,13 +258,25 @@ final class CandidatePanelController: NSObject {
         }
         panel.setContentSize(NSSize(width: width, height: panelH))
 
-        // AX->AppKit 全局 y 翻转（基于主屏高度）；外边距 pad 从 gap/x 扣除以保持卡片视觉位置。
-        var origin = PanelPositioning.panelOrigin(composerAXFrame: axFrame,
+        // 自动锚点叠加手动偏移再夹紧进可见区。manualOffset 为 .zero 时与原"自动锚点+两次夹紧"逐像素一致。
+        let origin = PanelPositioning.clamped(origin: autoOrigin(), offset: manualOffset,
+                                              size: CGSize(width: width, height: panelH), within: vf)
+        panel.setFrameOrigin(origin)
+    }
+
+    /// 未夹紧的自动锚点（AppKit 全局左下原点）：AX->AppKit 全局 y 翻转（基于主屏高度），
+    /// 外边距 pad 从 gap/x 扣除以保持卡片视觉位置。不依赖面板 width/height，故 dragMoved 里也能算同一基准。
+    private func autoOrigin() -> CGPoint {
+        let pad = CandidatePanelView.shadowPad
+        var origin = PanelPositioning.panelOrigin(composerAXFrame: anchorAXFrame,
                                                   primaryScreenHeight: Self.primaryScreenHeight, gap: Layout.gap - pad)
         origin.x -= pad
-        origin.x = max(vf.minX, min(origin.x, vf.maxX - width))
-        origin.y = max(vf.minY, min(origin.y, vf.maxY - panelH))
-        panel.setFrameOrigin(origin)
+        return origin
+    }
+
+    /// 持久化手动偏移到 UserDefaults（[Δx, Δy]）。
+    private func saveManualOffset() {
+        UserDefaults.standard.set([Double(manualOffset.width), Double(manualOffset.height)], forKey: Self.manualOffsetKey)
     }
 
     /// 面板存活期间的键盘处理：
