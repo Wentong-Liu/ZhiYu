@@ -279,13 +279,11 @@ struct SettingsView: View {
             permissionCard(name: "辅助功能",
                            desc: "读消息、填入/发送、转文字、发表情都需要",
                            granted: vm.axGranted) {
-                AccessibilityAuthorizer.promptIfNeeded()
                 AccessibilityAuthorizer.openSettings()
             }
             permissionCard(name: "屏幕录制",
                            desc: "识别图片/表情需要；不授权时图片按纯文本处理",
                            granted: vm.screenGranted) {
-                _ = ScreenRecordingAuthorizer.request()
                 ScreenRecordingAuthorizer.openSettings()
             }
         }

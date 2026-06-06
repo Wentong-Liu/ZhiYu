@@ -63,10 +63,9 @@ final class CandidatePanelController: NSObject {
 
     /// 双击触发：复用记住的面板位置立即弹加载面板，再在下一个 runloop 异步读会话→读回来只出候选不重定位→生成（先弹后读，消除可感延迟与跳动）。
     func trigger() {
-        // 未授予辅助功能权限时：弹系统授权提示并打开系统设置引导用户授权，不再静默 beep。
+        // 未授予辅助功能权限时：仅弹系统授权提示（其自带"打开系统设置"按钮，用户点了才开），不再自动打开系统设置，不静默 beep。
         guard AccessibilityAuthorizer.isTrusted else {
             AccessibilityAuthorizer.promptIfNeeded()
-            AccessibilityAuthorizer.openSettings()
             return
         }
         // 本机从未成功弹过、无可用锚点：退回"先读后弹"仅此一次（读到的 composer frame 即成首个锚点）。
