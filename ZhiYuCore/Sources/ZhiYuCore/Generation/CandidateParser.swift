@@ -1,10 +1,11 @@
 import Foundation
 
 /// 把模型原始输出解析为候选列表：优先 JSON 字符串数组，失败则按行兜底（去编号/项目符号）。
+/// parse 的实际行为：逐项 trim → 去空 → 去掉「表情提示行」（行首 `表情:`/`表情：`）→ 保序去重 → 截断到 max 条。
 public enum CandidateParser {
     public static func parse(_ raw: String, max: Int) -> [String] {
         var items = parseJSONArray(raw) ?? parseLines(raw)
-        // trim + 去空 + 去表情行 + 去重（保序）
+        // 逐项 trim → 去空 → 去掉「表情提示行」(行首 表情:/表情：) → 保序去重（截断在 return 处取 prefix(max)）
         var seen = Set<String>()
         items = items
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -18,7 +19,7 @@ public enum CandidateParser {
     private static let stickerPrefix = "^\\s*表情\\s*[:：]"
 
     /// 解析可选的"表情关键词"：匹配独立的一行 `表情: 关键词` / `表情：关键词`（半/全角冒号）。
-    /// 去掉引号/方括号/书名号；"无"/"none"/"没有"视为不建议表情，返回 nil。
+    /// 去掉引号/方括号/书名号；否定词「无 / 没有 / none / n/a / 不需要」视为不建议表情，返回 nil。
     public static func parseSticker(_ raw: String) -> String? {
         // 多行模式下复用 stickerPrefix，并用捕获组直接取关键词。
         guard let re = try? NSRegularExpression(pattern: "(?m)" + stickerPrefix + "\\s*(.+)$"),

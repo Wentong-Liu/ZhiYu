@@ -56,7 +56,7 @@ enum ProviderKind: String, CaseIterable, Identifiable {
 @MainActor
 final class AppConfig {
     static let shared = AppConfig()
-    private let d = UserDefaults.standard
+    private let defaults = UserDefaults.standard
 
     /// 持久化用的 UserDefaults 键。字符串值是落盘键名，**改了会丢已有配置**，不可变。
     private enum Key {
@@ -69,42 +69,46 @@ final class AppConfig {
     }
 
     var providerKind: ProviderKind {
-        get { ProviderKind(rawValue: d.string(forKey: Key.providerKind) ?? "") ?? .openAI }
-        set { d.set(newValue.rawValue, forKey: Key.providerKind) }
+        // 静默回落：落盘的是 ProviderKind.rawValue（中文/英文展示名）。
+        // 改了 rawValue 字面量会让旧落盘值匹配不上，这里回落到 .openAI 即丢用户原选的 Provider 配置。
+        get { ProviderKind(rawValue: defaults.string(forKey: Key.providerKind) ?? "") ?? .openAI }
+        set { defaults.set(newValue.rawValue, forKey: Key.providerKind) }
     }
     var model: String {
         // 夹回到当前 Provider 的可选模型：持久化的 model 若不属于当前 providerKind
         // （例如换过 Provider 但没点过模型下拉），回落到该 Provider 的默认模型，
         // 避免把不属于该 Provider 的 model id 发给 API。
         get {
-            let stored = d.string(forKey: Key.model)
+            let stored = defaults.string(forKey: Key.model)
             let valid = providerKind.modelOptions.map(\.id)
             if let stored, valid.contains(stored) { return stored }
             return providerKind.defaultModel
         }
-        set { d.set(newValue, forKey: Key.model) }
+        set { defaults.set(newValue, forKey: Key.model) }
     }
     var styleIndex: Int {
-        get { d.integer(forKey: Key.styleIndex) }
-        set { d.set(newValue, forKey: Key.styleIndex) }
+        get { defaults.integer(forKey: Key.styleIndex) }
+        set { defaults.set(newValue, forKey: Key.styleIndex) }
     }
 
     /// 自定义提示词（风格选"自定义"时用）。
     var customPrompt: String {
-        get { d.string(forKey: Key.customPrompt) ?? "" }
-        set { d.set(newValue, forKey: Key.customPrompt) }
+        get { defaults.string(forKey: Key.customPrompt) ?? "" }
+        set { defaults.set(newValue, forKey: Key.customPrompt) }
     }
 
     /// 新消息自动预生成候选、切到微信前台时弹出。默认开。
     var autoOnNewMessage: Bool {
-        get { d.object(forKey: Key.autoOnNewMessage) == nil ? true : d.bool(forKey: Key.autoOnNewMessage) }
-        set { d.set(newValue, forKey: Key.autoOnNewMessage) }
+        get { defaults.object(forKey: Key.autoOnNewMessage) == nil ? true : defaults.bool(forKey: Key.autoOnNewMessage) }
+        set { defaults.set(newValue, forKey: Key.autoOnNewMessage) }
     }
 
     /// 唤起候选面板的「双击修饰键」。缺省双击右⌘；监听处实时读它，改了立即生效。
     var triggerKey: TriggerKey {
-        get { TriggerKey(rawValue: d.string(forKey: Key.triggerKey) ?? "") ?? .rightCommand }
-        set { d.set(newValue.rawValue, forKey: Key.triggerKey) }
+        // 静默回落：落盘的是 TriggerKey.rawValue。改了 rawValue 字面量会让旧落盘值匹配不上，
+        // 这里回落到 .rightCommand 即丢用户原选的修饰键配置。
+        get { TriggerKey(rawValue: defaults.string(forKey: Key.triggerKey) ?? "") ?? .rightCommand }
+        set { defaults.set(newValue.rawValue, forKey: Key.triggerKey) }
     }
 
     /// 当前风格：styleIndex 落在预设范围内取预设，否则取自定义提示词。

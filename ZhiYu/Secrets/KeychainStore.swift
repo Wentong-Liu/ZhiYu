@@ -2,7 +2,7 @@ import Foundation
 import Security
 import ZhiYuCore
 
-/// 极简 Keychain 读写（generic password）。存 OpenAI/DeepSeek/Anthropic API Key 与 ChatGPT OAuthTokens。
+/// 极简 Keychain 读写（generic password）。存各 Provider 的 API Key（OpenAI/DeepSeek/Anthropic/GLM/Kimi/MiniMax）与 ChatGPT OAuthTokens。
 enum KeychainStore {
     static let service = "com.liuwentong.ZhiYu"
     static let openAIKeyAccount = "openai.apiKey"

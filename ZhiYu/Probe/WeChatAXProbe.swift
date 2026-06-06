@@ -90,8 +90,8 @@ enum WeChatAXProbe {
         var diagnostics: [String]   // 定位/回退诊断信息
     }
 
-    /// 统一的"这是微信吗"名字白名单（bundle id 或本地化名 WeChat/微信）。
-    /// findWeChatApp 的查找子句与 CandidatePanelController 的"前台是不是微信"复用同一口径。
+    /// 统一的"这是微信吗"判定（bundle id 命中 bundleIDs，或本地化名为 WeChat/微信）。
+    /// findWeChatApp（名字匹配子句）与 CandidatePanelController.isWeChatFrontmost 都调用此函数，口径一致。
     static func isWeChat(_ app: NSRunningApplication) -> Bool {
         if let id = app.bundleIdentifier, bundleIDs.contains(id) { return true }
         return app.localizedName == "WeChat" || app.localizedName == "微信"
@@ -103,7 +103,7 @@ enum WeChatAXProbe {
         if let byID = apps.first(where: { ($0.bundleIdentifier).map(bundleIDs.contains) ?? false }) {
             return byID
         }
-        // 名字匹配复用统一白名单（与 isWeChatFrontmost 同口径）。
+        // 名字匹配复用统一判定 isWeChat（与 CandidatePanelController.isWeChatFrontmost 同口径）。
         return apps.first(where: isWeChat)
     }
 
@@ -165,7 +165,7 @@ enum WeChatAXProbe {
             ?? app.localizedName
             ?? "未知联系人"
 
-        // d/e. 读消息：遍历消息表的行（文档顺序=时间顺序），只取最后 N 行，只读 AXValue 并解析说话人。
+        // d/e. 读消息：遍历消息表的行（文档顺序=时间顺序），只取最后 N 行，读 bestText(AXValue/AXTitle/AXDescription) 并解析说话人。
         var messages: [Message] = []
         if let table = messageTable {
             messages = readMessages(from: table, diagnostics: &diagnostics)
@@ -332,7 +332,7 @@ enum WeChatAXProbe {
 
     /// 读消息：优先按 AXRow/AXTableRow 直接行读取；若拿不到行（AppKit 表格有时把行挂在 AXColumn 下，
     /// 或 AXChildren 不直接给行），则在表子树内按文档顺序收集叶子非空 AXValue 兜底（表子树小，开销可接受）。
-    /// 只读 AXValue，解析说话人，取最后 N 行。
+    /// 读 bestText(AXValue/AXTitle/AXDescription)，解析说话人，取最后 N 行。
     private static func readMessages(from table: AXUIElement, diagnostics: inout [String]) -> [Message] {
         let allChildren = children(table)
         let rows = rows(of: table)
@@ -402,7 +402,7 @@ enum WeChatAXProbe {
         }
     }
 
-    /// 行内下钻到第一个含非空 AXValue 的叶子，只读 AXValue。
+    /// 行内下钻到第一个含非空文本的叶子，读 bestText(AXValue/AXTitle/AXDescription)。
     private static func firstNonEmptyValue(in el: AXUIElement, depth: Int) -> String? {
         guard depth < rowDescendMaxDepth else { return nil }
         if let v = bestText(el) {

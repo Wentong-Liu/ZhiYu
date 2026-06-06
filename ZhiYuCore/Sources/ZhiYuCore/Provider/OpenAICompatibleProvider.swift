@@ -1,6 +1,8 @@
 import Foundation
 
-/// 调用 OpenAI 兼容的 /chat/completions。Key 由调用方传入（不读 Keychain，保持可测）。
+/// 调用 OpenAI 兼容的 /chat/completions。provider-agnostic：凡走该协议的 Provider 均复用本类型
+/// （当前 OpenAI / DeepSeek / 智谱GLM / Kimi / MiniMax，及非 OAuth 的 OpenAI 视觉模型）。
+/// Key 由调用方传入（不读 Keychain，保持可测）。
 public struct OpenAICompatibleProvider: LLMProvider {
     private let config: ProviderConfig
     private let apiKey: String

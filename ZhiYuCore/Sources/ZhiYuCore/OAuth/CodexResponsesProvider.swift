@@ -26,13 +26,13 @@ public struct CodexResponsesProvider: LLMProvider {
     public func complete(messages: [LLMMessage]) async throws -> String {
         guard !accessToken.isEmpty else { throw ProviderError.missingAPIKey }
         let system = messages.first(where: { $0.role == .system })?.content ?? "You are a helpful assistant."
-        let input: [[String: Any]] = messages.filter { $0.role != .system }.map { m in
-            let type = (m.role == .assistant) ? "output_text" : "input_text"
-            var content: [[String: Any]] = [["type": type, "text": m.content]]
-            for url in m.imageDataURLs {
+        let input: [[String: Any]] = messages.filter { $0.role != .system }.map { message in
+            let type = (message.role == .assistant) ? "output_text" : "input_text"
+            var content: [[String: Any]] = [["type": type, "text": message.content]]
+            for url in message.imageDataURLs {
                 content.append(["type": "input_image", "image_url": url])
             }
-            return ["role": m.role.rawValue, "content": content]
+            return ["role": message.role.rawValue, "content": content]
         }
         let body: [String: Any] = [
             "model": model,
@@ -83,12 +83,12 @@ public struct CodexResponsesProvider: LLMProvider {
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
             if payload.isEmpty || payload == "[DONE]" { continue }
-            guard let d = payload.data(using: .utf8),
-                  let ev = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-                  let type = ev["type"] as? String else { continue }
+            guard let payloadData = payload.data(using: .utf8),
+                  let event = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+                  let type = event["type"] as? String else { continue }
             switch type {
             case "response.output_text.delta":
-                if let delta = ev["delta"] as? String { text += delta }
+                if let delta = event["delta"] as? String { text += delta }
             case "response.completed", "response.done", "response.incomplete":
                 return text
             case "error", "response.failed":

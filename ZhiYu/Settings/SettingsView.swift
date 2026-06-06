@@ -15,7 +15,7 @@ enum ProviderFamily: String, CaseIterable, Identifiable {
 
 @MainActor
 final class SettingsModel: ObservableObject {
-    /// 当前启用的家族（OpenAI / DeepSeek）。
+    /// 当前启用的家族（OpenAI / DeepSeek / Anthropic / 智谱GLM / Kimi / MiniMax，见 ProviderFamily）。
     @Published var family: ProviderFamily { didSet { applyKind() } }
     /// OpenAI 家族下用 ChatGPT 登录(true) 还是 API Key(false)。
     @Published var openAIUsesChatGPT: Bool { didSet { if family == .openAI { applyKind() } } }
@@ -279,7 +279,7 @@ struct SettingsView: View {
         }
     }
 
-    /// 「通用设置」选项卡：触发方式（双击右 ⌘）+ 新消息自动生成候选。
+    /// 「通用设置」选项卡：触发方式（双击修饰键，默认右 ⌘）+ 新消息自动生成候选。
     private var generalTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {

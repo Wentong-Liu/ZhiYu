@@ -1,6 +1,6 @@
 import Foundation
 
-/// 一个大模型 Provider 的连接配置。Phase 2 仅用 API Key 鉴权（key 不放这里，调用时传入）。
+/// 一个大模型 Provider 的连接配置（name/baseURL/model）。API Key 不放这里，调用时传入。
 public struct ProviderConfig: Equatable, Sendable {
     public let name: String
     public let baseURL: String   // 形如 "https://api.openai.com/v1"
