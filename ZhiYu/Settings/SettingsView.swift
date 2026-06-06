@@ -158,6 +158,9 @@ struct SettingsView: View {
     @StateObject private var vm = SettingsModel()
     @State private var selectedTab: SettingsTab = .provider
 
+    /// 隐藏系统标题栏后内容延伸到顶；红绿灯浮在左上角，这里为整窗顶部预留的标题栏高度。
+    private let titleBarInset: CGFloat = 32
+
     var body: some View {
         HStack(spacing: 0) {
             sidebar
@@ -170,7 +173,9 @@ struct SettingsView: View {
                 case .general:  generalTab
                 }
             }
-            .padding(22)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 22)
+            .padding(.top, titleBarInset)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: 720, height: 600)
@@ -181,6 +186,7 @@ struct SettingsView: View {
     /// 左侧导航栏：品牌头（图标 + 知语设置）+ 各选项卡导航项。
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // 品牌头放到标题栏那一行，向右挪开红绿灯（leading 内边距让它出现在红绿灯右侧、同一行）。
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(.white.opacity(0.12))
@@ -189,6 +195,7 @@ struct SettingsView: View {
                         .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)))
                 Text("知语设置").font(.headline).foregroundStyle(.white.opacity(0.95))
             }
+            .padding(.leading, 52)
             .padding(.bottom, 4)
 
             ForEach(SettingsTab.allCases) { tab in
@@ -196,7 +203,9 @@ struct SettingsView: View {
             }
             Spacer()
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .padding(.top, titleBarInset)
         .frame(width: 200)
         .frame(maxHeight: .infinity, alignment: .top)
     }
