@@ -6,20 +6,49 @@ public struct OpenAICompatibleProvider: LLMProvider {
     private let apiKey: String
     private let session: URLSession
     private let extraHeaders: [String: String]
+    /// 是否把图片发给模型。OpenAI（gpt-4o 等支持视觉）传 true；DeepSeek（纯文本）保持 false。
+    private let sendsImages: Bool
 
     /// 单次请求超时（秒）。非流式 chat/completions 一次性返回，给足整体上限即可。
     private static let requestTimeout: TimeInterval = 60
 
     public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared,
-                extraHeaders: [String: String] = [:]) {
+                extraHeaders: [String: String] = [:], sendsImages: Bool = false) {
         self.config = config
         self.apiKey = apiKey
         self.session = session
         self.extraHeaders = extraHeaders
+        self.sendsImages = sendsImages
     }
 
-    /// 发给 chat/completions 的线上消息，仅含 role+content（不带图片字段）。
-    private struct WireMessage: Encodable { let role: String; let content: String }
+    /// 一条 message 的 content：要么纯字符串（无图/不发图），要么 parts 数组（文本 part + 每张图一个 image_url part）。
+    /// 用自定义 Encodable 表达这种多态——纯字符串分支与旧行为逐字节一致。
+    private enum WireContent: Encodable {
+        case text(String)
+        case parts(text: String, imageURLs: [String])
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .text(s):
+                var c = encoder.singleValueContainer()
+                try c.encode(s)
+            case let .parts(text, imageURLs):
+                var c = encoder.unkeyedContainer()
+                try c.encode(TextPart(text: text))
+                for url in imageURLs { try c.encode(ImagePart(image_url: .init(url: url))) }
+            }
+        }
+
+        private struct TextPart: Encodable { let type = "text"; let text: String }
+        private struct ImagePart: Encodable {
+            struct URLBox: Encodable { let url: String }
+            let type = "image_url"
+            let image_url: URLBox
+        }
+    }
+
+    /// 发给 chat/completions 的线上消息（content 可为字符串或 parts 数组）。
+    private struct WireMessage: Encodable { let role: String; let content: WireContent }
     private struct RequestBody: Encodable {
         let model: String
         let messages: [WireMessage]
@@ -41,7 +70,9 @@ public struct OpenAICompatibleProvider: LLMProvider {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
-        let wire = messages.map { WireMessage(role: $0.role.rawValue, content: $0.content) }
+        let wire = messages.map {
+            WireMessage(role: $0.role.rawValue, content: Self.wireContent(for: $0, sendsImages: sendsImages))
+        }
         req.httpBody = try JSONEncoder().encode(
             RequestBody(model: config.model, messages: wire, temperature: 0.9))
 
@@ -59,5 +90,15 @@ public struct OpenAICompatibleProvider: LLMProvider {
             throw ProviderError.invalidResponse
         }
         return content
+    }
+
+    /// 把一条 LLMMessage 转成线上 content：
+    /// 仅当 sendsImages 且该消息带图时，编码为 parts 数组（文本 part + 每张图 image_url part，url 直接用 dataURL）；
+    /// 否则编码为纯字符串（与旧行为逐字节一致）。
+    private static func wireContent(for msg: LLMMessage, sendsImages: Bool) -> WireContent {
+        if sendsImages, !msg.imageDataURLs.isEmpty {
+            return .parts(text: msg.content, imageURLs: msg.imageDataURLs)
+        }
+        return .text(msg.content)
     }
 }

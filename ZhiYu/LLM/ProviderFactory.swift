@@ -10,7 +10,7 @@ enum ProviderFactory {
         case .openAI:
             let k = KeychainStore.openAIKey().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .openAI(model: cfg.model), apiKey: k)
+            return OpenAICompatibleProvider(config: .openAI(model: cfg.model), apiKey: k, sendsImages: true)
         case .deepSeek:
             let k = KeychainStore.deepSeekKey().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !k.isEmpty else { throw ProviderError.missingAPIKey }
