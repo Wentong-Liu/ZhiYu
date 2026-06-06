@@ -240,7 +240,8 @@ final class CandidatePanelController: NSObject {
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         self.anchorAXFrame = axFrame
         model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
-        model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
+        // 必须先关面板释放 key 焦点（把键盘焦点交还微信），否则第一条回车会进 key 面板而非微信。
+        model.onSend = { [weak self] t in self?.dismiss(); Inserter.sendSequential(BubbleSplitter.split(t)) }
         model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
         model.onDismiss = { [weak self] in self?.dismiss() }
         // 拖动松手：把面板当前原点相对实时自动锚点的差值记为手动偏移并持久化（跟随微信窗口）。
