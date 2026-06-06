@@ -26,7 +26,16 @@ final class SettingsModel: ObservableObject {
     @Published var apiKey: String = ""
     @Published var status = ""
     @Published var loggedIn = KeychainStore.loadChatGPTTokens() != nil
+    /// 辅助功能 / 屏幕录制是否已授权（用于「通用」tab 权限区实时显示）。
+    @Published var axGranted: Bool = AccessibilityAuthorizer.isTrusted
+    @Published var screenGranted: Bool = ScreenRecordingAuthorizer.isTrusted
     let styles = ReplyStyle.presets
+
+    /// 重新读取系统权限状态（去系统设置授完权切回 App 时调用，自动刷新绿点/按钮）。
+    func refreshPermissions() {
+        axGranted = AccessibilityAuthorizer.isTrusted
+        screenGranted = ScreenRecordingAuthorizer.isTrusted
+    }
 
     /// 家族 + OpenAI 子选择 -> 实际 ProviderKind。
     var currentKind: ProviderKind {
@@ -181,6 +190,10 @@ struct SettingsView: View {
         .frame(width: 720, height: 600)
         .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
         .environment(\.colorScheme, .dark)
+        .onAppear { vm.refreshPermissions() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            vm.refreshPermissions()
+        }
     }
 
     /// 左侧导航栏：品牌头（图标 + 知语设置）+ 各选项卡导航项。
@@ -249,11 +262,55 @@ struct SettingsView: View {
     private var generalTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                permissionSection
                 triggerSection
             }
             .padding(.top, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// 「权限」区：辅助功能 + 屏幕录制两张卡；已授权显示绿点，否则「去授权」按钮。
+    private var permissionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("权限")
+            permissionCard(name: "辅助功能",
+                           desc: "读消息、填入/发送、转文字、发表情都需要",
+                           granted: vm.axGranted) {
+                AccessibilityAuthorizer.promptIfNeeded()
+                AccessibilityAuthorizer.openSettings()
+            }
+            permissionCard(name: "屏幕录制",
+                           desc: "识别图片/表情需要；不授权时图片按纯文本处理",
+                           granted: vm.screenGranted) {
+                _ = ScreenRecordingAuthorizer.request()
+                ScreenRecordingAuthorizer.openSettings()
+            }
+        }
+    }
+
+    /// 单张权限卡：左侧名称+小字说明，右侧已授权绿点或「去授权」按钮。
+    private func permissionCard(name: String, desc: String, granted: Bool,
+                                onAuthorize: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.callout).foregroundStyle(.white.opacity(0.9))
+                Text(desc).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if granted {
+                HStack(spacing: 6) {
+                    Circle().fill(Color.green).frame(width: 8, height: 8)
+                    Text("已授权").font(.callout).foregroundStyle(.white.opacity(0.9))
+                }
+            } else {
+                Button("去授权", action: onAuthorize).buttonStyle(MonoButton(filled: true))
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
     }
 
     private func sectionHeader(_ t: String) -> some View {
