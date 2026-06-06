@@ -2,12 +2,17 @@ import Foundation
 
 /// 把模型原始输出解析为候选列表：优先 JSON 字符串数组，失败则按行兜底（去编号/项目符号）。
 /// parse 的实际行为：逐项 trim → 去空 → 去掉「表情提示行」（行首 `表情:`/`表情：`）→ 保序去重 → 截断到 max 条。
+///
+/// 解析契约由 PromptBuilder 的 system prompt 约定（"只返回一个 JSON 数组" / 表情提示行另起一行写「表情: 关键词」）：
+/// 改这里的 JSON 解析或 stickerPrefix 前缀，必须同步检查 PromptBuilder 的对应文案。
 public enum CandidateParser {
     public static func parse(_ raw: String, max: Int) -> [String] {
         var items = parseJSONArray(raw) ?? parseLines(raw)
         // 逐项 trim → 去空 → 去掉「表情提示行」(行首 表情:/表情：) → 保序去重（截断在 return 处取 prefix(max)）
         var seen = Set<String>()
         items = items
+            // 这里 trim 的是「整条候选项」（内部可能含 \n 作为多气泡分隔），故用 whitespacesAndNewlines 去掉首尾换行；
+            // 切勿与 parseLines / BubbleSplitter 的逐行 .whitespaces trim 合并——后者已按行切分，语义不同。
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .filter { $0.range(of: stickerPrefix, options: .regularExpression) == nil }

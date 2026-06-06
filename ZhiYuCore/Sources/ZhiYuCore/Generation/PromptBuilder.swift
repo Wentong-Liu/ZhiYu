@@ -6,13 +6,19 @@ public enum PromptBuilder {
     public static func build(context: ChatContext, style: ReplyStyle, candidateCount: Int) -> [LLMMessage] {
         let trailing = MessageRhythm.trailingOtherCount(context.messages)
         let rhythm: String
-        if trailing >= 2 {
+        if trailing >= MessageRhythm.multiBubbleThreshold {
+            // 「\n 分隔的小消息」契约：发送时由 BubbleSplitter.split 按换行拆成多条气泡。
+            // 若此处改换行约定（分隔符/拆分规则），必须同步改 BubbleSplitter。
             rhythm = "对方最近连发了 \(trailing) 条消息。请用相近数量（约 \(trailing) 条）的简短消息回应，"
                 + "模仿对方的长度与节奏，不要把多句挤成一长段；"
                 + "每条候选内部用换行符 \\n 分隔这些小消息（发送时会拆成多条单独发出）。"
         } else {
             rhythm = "对方最近只发了一条，正常回一条即可（不需要换行拆分）。"
         }
+        // 下面的 system prompt 定义了三条「输出契约」，解析端各有对应实现，改文案务必同步：
+        //   1) JSON 数组输出（"只返回一个 JSON 数组…"）          → CandidateParser.parse / parseJSONArray
+        //   2) 多条小消息用换行符 \n 分隔（示例 "在的\n咋了"）      → BubbleSplitter.split
+        //   3) 表情提示行另起一行写「表情: 关键词」                → CandidateParser.parseSticker（前缀同 stickerPrefix）
         let system = """
         你在帮"我"回微信，目标是让回复像"我"本人随手打的，而不是 AI 生成的。像跟熟人聊天，不是客服。
         先根据对话判断"我"和对方的关系与熟络程度（哥们/对象/家人/同事/客户/刚认识…），用匹配这段关系的语气和分寸来回。
