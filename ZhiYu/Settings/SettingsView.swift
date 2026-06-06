@@ -279,6 +279,11 @@ struct SettingsView: View {
                 }
                 .labelsHidden().tint(.white).frame(width: 130)
             }
+            if !vm.currentKind.supportsMultimodal {
+                Text("⚠️ 当前模型不支持多模态，无法识别图片和表情包（图片消息将按纯文本处理）")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if vm.styleIndex >= vm.styles.count {
                 TextEditor(text: $vm.customPrompt)
                     .font(.callout)

@@ -27,6 +27,15 @@ enum ProviderKind: String, CaseIterable, Identifiable {
         }
     }
     var defaultModel: String { modelOptions.first?.id ?? "" }
+
+    /// 该 Provider 在本 App 内是否会把图片发给模型（即能否识别图片/表情包）。
+    /// Anthropic 与 ChatGPT 会发送图片；OpenAI/DeepSeek 走 OpenAICompatibleProvider 只发文本。
+    var supportsMultimodal: Bool {
+        switch self {
+        case .anthropic, .chatGPT: return true
+        case .openAI, .deepSeek: return false
+        }
+    }
 }
 
 /// 全局共享配置（非密钥项走 UserDefaults；密钥/token 仍在 Keychain）。

@@ -1,7 +1,7 @@
 import Foundation
 import ZhiYuCore
 
-/// 由当前配置构造一个 LLMProvider。ChatGPT 走 OAuth token；OpenAI/DeepSeek 走 Keychain key。
+/// 由当前配置构造一个 LLMProvider。ChatGPT 走 OAuth token；OpenAI/DeepSeek/Anthropic 走 Keychain key。
 @MainActor
 enum ProviderFactory {
     static func make() async throws -> any LLMProvider {
