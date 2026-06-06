@@ -208,7 +208,7 @@ struct SettingsView: View {
                         .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)))
                 Text("知语设置").font(.headline).foregroundStyle(.white.opacity(0.95))
             }
-            .padding(.leading, 52)
+            .padding(.leading, 10)
             .padding(.bottom, 4)
 
             ForEach(SettingsTab.allCases) { tab in
