@@ -133,26 +133,59 @@ private struct MonoButton: ButtonStyle {
     }
 }
 
+/// 设置窗口的两个选项卡。
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case provider = "模型 / Provider"
+    case general = "通用设置"
+    var id: String { rawValue }
+}
+
 struct SettingsView: View {
     @StateObject private var vm = SettingsModel()
+    @State private var selectedTab: SettingsTab = .provider
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            title
+            monoSegment(options: SettingsTab.allCases.map { ($0.rawValue, $0.rawValue) },
+                        selectedID: selectedTab.rawValue) { id in
+                if let t = SettingsTab(rawValue: id) { selectedTab = t }
+            }
+            switch selectedTab {
+            case .provider: providerTab
+            case .general:  generalTab
+            }
+        }
+        .padding(22)
+        .frame(width: 620, height: 600)
+        .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
+        .environment(\.colorScheme, .dark)
+    }
+
+    /// 「模型 / Provider」选项卡：provider 卡 + 模型/风格 + 存 Key 的 status 文案。
+    private var providerTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                title
                 providerSection
                 modelStyleSection
-                triggerSection
                 if !vm.status.isEmpty {
                     Text(vm.status).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .padding(22)
+            .padding(.top, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 460, height: 560)
-        .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
-        .environment(\.colorScheme, .dark)
+    }
+
+    /// 「通用设置」选项卡：触发方式（双击右 ⌘）+ 新消息自动生成候选。
+    private var generalTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                triggerSection
+            }
+            .padding(.top, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var title: some View {
