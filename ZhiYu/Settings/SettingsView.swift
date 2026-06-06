@@ -138,6 +138,20 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case provider = "模型 / Provider"
     case general = "通用设置"
     var id: String { rawValue }
+    /// 侧边栏/右侧大标题用的短名称。
+    var shortTitle: String {
+        switch self {
+        case .provider: return "模型"
+        case .general:  return "通用"
+        }
+    }
+    /// 侧边栏图标。
+    var icon: String {
+        switch self {
+        case .provider: return "square.stack.3d.up.fill"
+        case .general:  return "gearshape"
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -145,21 +159,66 @@ struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .provider
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            title
-            monoSegment(options: SettingsTab.allCases.map { ($0.rawValue, $0.rawValue) },
-                        selectedID: selectedTab.rawValue) { id in
-                if let t = SettingsTab(rawValue: id) { selectedTab = t }
+        HStack(spacing: 0) {
+            sidebar
+            Divider().overlay(.white.opacity(0.08))
+            VStack(alignment: .leading, spacing: 16) {
+                Text(selectedTab.shortTitle)
+                    .font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(0.95))
+                switch selectedTab {
+                case .provider: providerTab
+                case .general:  generalTab
+                }
             }
-            switch selectedTab {
-            case .provider: providerTab
-            case .general:  generalTab
-            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(22)
-        .frame(width: 620, height: 600)
+        .frame(width: 720, height: 600)
         .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
         .environment(\.colorScheme, .dark)
+    }
+
+    /// 左侧导航栏：品牌头（图标 + 知语设置）+ 各选项卡导航项。
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 28, height: 28)
+                    .overlay(Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)))
+                Text("知语设置").font(.headline).foregroundStyle(.white.opacity(0.95))
+            }
+            .padding(.bottom, 4)
+
+            ForEach(SettingsTab.allCases) { tab in
+                sidebarRow(tab)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(width: 200)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func sidebarRow(_ tab: SettingsTab) -> some View {
+        let selected = (tab == selectedTab)
+        return HStack(spacing: 10) {
+            Image(systemName: tab.icon)
+                .font(.system(size: 14))
+                .frame(width: 18)
+                .foregroundStyle(selected ? .white.opacity(0.95) : .white.opacity(0.55))
+            Text(tab.shortTitle)
+                .font(.callout)
+                .foregroundStyle(selected ? .white.opacity(0.95) : .white.opacity(0.7))
+            Spacer()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(.white.opacity(selected ? 0.1 : 0)))
+        .contentShape(Rectangle())
+        .onTapGesture { selectedTab = tab }
+        .animation(.easeOut(duration: 0.14), value: selected)
     }
 
     /// 「模型 / Provider」选项卡：provider 卡 + 模型/风格 + 存 Key 的 status 文案。
@@ -185,17 +244,6 @@ struct SettingsView: View {
             }
             .padding(.top, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var title: some View {
-        HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.white.opacity(0.12))
-                .frame(width: 28, height: 28)
-                .overlay(Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)))
-            Text("知语设置").font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(0.95))
         }
     }
 
