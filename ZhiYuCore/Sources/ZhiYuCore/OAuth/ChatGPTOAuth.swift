@@ -6,6 +6,8 @@ public enum ChatGPTOAuth {
     public static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     public static let authorizeEndpoint = "https://auth.openai.com/oauth/authorize"
     public static let tokenEndpoint = "https://auth.openai.com/oauth/token"
+    /// Codex Responses API（SSE）端点（单一真相源，供 CodexResponsesProvider 复用）。
+    public static let responsesEndpoint = "https://chatgpt.com/backend-api/codex/responses"
     /// OAuth 回调本地回环服务的端口/host（单一真相源，供 CodexLoginService 起 NWListener、拼回调 URL 复用）。
     public static let callbackHost = "127.0.0.1"
     public static let callbackPort: UInt16 = 1455
@@ -82,7 +84,7 @@ public enum ChatGPTOAuth {
     private static func formPost(body: String) -> URLRequest {
         var req = URLRequest(url: URL(string: tokenEndpoint)!)
         req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: HTTPConstants.contentTypeHeader)
         req.httpBody = Data(body.utf8)
         return req
     }

@@ -45,19 +45,19 @@ public struct CodexResponsesProvider: LLMProvider {
             "tool_choice": "auto",
             "parallel_tool_calls": true,
         ]
-        guard let url = URL(string: "https://chatgpt.com/backend-api/codex/responses") else {
+        guard let url = URL(string: ChatGPTOAuth.responsesEndpoint) else {
             throw ProviderError.invalidResponse
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = Self.requestTimeout
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setBearerAuthorization(accessToken)
         req.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
         req.setValue(ChatGPTOAuth.originator, forHTTPHeaderField: "originator")
         req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         req.setValue("responses=experimental", forHTTPHeaderField: "OpenAI-Beta")
-        req.setValue("text/event-stream", forHTTPHeaderField: "accept")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue("text/event-stream", forHTTPHeaderField: HTTPConstants.acceptHeader)
+        req.setValue(HTTPConstants.applicationJSON, forHTTPHeaderField: HTTPConstants.contentTypeHeader)
         req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.withoutEscapingSlashes])
 
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)

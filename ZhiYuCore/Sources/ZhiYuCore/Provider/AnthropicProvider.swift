@@ -70,13 +70,13 @@ public struct AnthropicProvider: LLMProvider {
 
     public func complete(messages: [LLMMessage]) async throws -> String {
         guard !apiKey.isEmpty else { throw ProviderError.missingAPIKey }
-        guard let url = URL(string: config.baseURL + "/messages") else {
+        guard let url = URL(string: config.baseURL + HTTPConstants.messagesPath) else {
             throw ProviderError.invalidResponse
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = Self.requestTimeout
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(HTTPConstants.applicationJSON, forHTTPHeaderField: HTTPConstants.contentTypeHeader)
         req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         req.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
 

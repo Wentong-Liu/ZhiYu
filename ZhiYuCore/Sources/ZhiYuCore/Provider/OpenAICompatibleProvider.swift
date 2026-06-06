@@ -61,14 +61,14 @@ public struct OpenAICompatibleProvider: LLMProvider {
 
     public func complete(messages: [LLMMessage]) async throws -> String {
         guard !apiKey.isEmpty else { throw ProviderError.missingAPIKey }
-        guard let url = URL(string: config.baseURL + "/chat/completions") else {
+        guard let url = URL(string: config.baseURL + HTTPConstants.chatCompletionsPath) else {
             throw ProviderError.invalidResponse
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = Self.requestTimeout
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(HTTPConstants.applicationJSON, forHTTPHeaderField: HTTPConstants.contentTypeHeader)
+        req.setBearerAuthorization(apiKey)
         let wire = messages.map {
             WireMessage(role: $0.role.rawValue, content: Self.wireContent(for: $0, sendsImages: sendsImages))
         }
