@@ -97,7 +97,7 @@ final class CodexLoginService {
             do {
                 let (data, resp) = try await URLSession.shared.data(
                     for: ChatGPTOAuth.tokenExchangeRequest(code: code, verifier: verifier))
-                guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else {
                     self.finish(.failure(LoginError.exchangeFailed(
                         String(data: data, encoding: .utf8) ?? "非2xx"))); return
                 }
@@ -126,7 +126,7 @@ final class CodexLoginService {
         do {
             let (data, resp) = try await URLSession.shared.data(
                 for: ChatGPTOAuth.refreshRequest(refreshToken: tokens.refreshToken))
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+            guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else { return nil }
             let refreshed = try ChatGPTOAuth.parseTokenResponse(data, fallbackRefresh: tokens.refreshToken)
             KeychainStore.saveChatGPTTokens(refreshed)
             return refreshed

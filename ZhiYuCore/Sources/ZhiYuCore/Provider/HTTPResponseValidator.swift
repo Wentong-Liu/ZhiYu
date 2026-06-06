@@ -2,9 +2,9 @@ import Foundation
 
 /// 两个 provider 共享的 HTTP 响应校验：把"取 HTTPURLResponse + 状态码区间判定 + 映射 ProviderError"
 /// 抽到一处，保证两边行为完全一致。
-enum HTTPResponseValidator {
+public enum HTTPResponseValidator {
     /// 视作成功的状态码区间。
-    static let successRange = 200..<300
+    public static let successRange = 200..<300
 
     /// 把 URLResponse 转成 HTTPURLResponse；不是 HTTP 响应则抛 `.invalidResponse`。
     static func httpResponse(from response: URLResponse) throws -> HTTPURLResponse {
