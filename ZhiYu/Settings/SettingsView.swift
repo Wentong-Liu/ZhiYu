@@ -23,6 +23,8 @@ final class SettingsModel: ObservableObject {
     @Published var styleIndex: Int { didSet { AppConfig.shared.styleIndex = styleIndex } }
     @Published var customPrompt: String { didSet { AppConfig.shared.customPrompt = customPrompt } }
     @Published var autoOnNewMessage: Bool { didSet { AppConfig.shared.autoOnNewMessage = autoOnNewMessage } }
+    /// 触发候选面板的「双击修饰键」。改了立即写回 AppConfig，监听处实时生效。
+    @Published var triggerKey: TriggerKey { didSet { AppConfig.shared.triggerKey = triggerKey } }
     @Published var apiKey: String = ""
     @Published var status = ""
     @Published var loggedIn = KeychainStore.loadChatGPTTokens() != nil
@@ -64,6 +66,7 @@ final class SettingsModel: ObservableObject {
         model = valid.contains(AppConfig.shared.model) ? AppConfig.shared.model : k.defaultModel
         styleIndex = AppConfig.shared.styleIndex
         autoOnNewMessage = AppConfig.shared.autoOnNewMessage
+        triggerKey = AppConfig.shared.triggerKey
         customPrompt = ""
         switch k {
         case .openAI: apiKey = KeychainStore.openAIKey()
@@ -528,9 +531,20 @@ struct SettingsView: View {
     private var triggerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("触发方式")
-            HStack(spacing: 8) {
-                Image(systemName: "command").foregroundStyle(.white.opacity(0.8))
-                Text("在微信里 双击右 ⌘ 唤起候选面板").font(.callout).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "command").foregroundStyle(.white.opacity(0.8))
+                    Text("触发快捷键").font(.callout).foregroundStyle(.white.opacity(0.9))
+                    Spacer()
+                    Picker("", selection: $vm.triggerKey) {
+                        ForEach(TriggerKey.allCases) { key in
+                            Text(key.label).tag(key)
+                        }
+                    }
+                    .labelsHidden().tint(.white).frame(width: 130)
+                }
+                Text("在微信里 \(vm.triggerKey.label) 唤起候选面板。")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)

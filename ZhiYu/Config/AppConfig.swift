@@ -65,6 +65,7 @@ final class AppConfig {
         static let styleIndex = "styleIndex"
         static let customPrompt = "customPrompt"
         static let autoOnNewMessage = "autoOnNewMessage"
+        static let triggerKey = "triggerKey"
     }
 
     var providerKind: ProviderKind {
@@ -98,6 +99,12 @@ final class AppConfig {
     var autoOnNewMessage: Bool {
         get { d.object(forKey: Key.autoOnNewMessage) == nil ? true : d.bool(forKey: Key.autoOnNewMessage) }
         set { d.set(newValue, forKey: Key.autoOnNewMessage) }
+    }
+
+    /// 唤起候选面板的「双击修饰键」。缺省双击右⌘；监听处实时读它，改了立即生效。
+    var triggerKey: TriggerKey {
+        get { TriggerKey(rawValue: d.string(forKey: Key.triggerKey) ?? "") ?? .rightCommand }
+        set { d.set(newValue.rawValue, forKey: Key.triggerKey) }
     }
 
     /// 当前风格：styleIndex 落在预设范围内取预设，否则取自定义提示词。
