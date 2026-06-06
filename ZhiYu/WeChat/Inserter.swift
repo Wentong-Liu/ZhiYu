@@ -52,7 +52,13 @@ enum Inserter {
         guard i < parts.count else { return }
         let text = parts[i]
         guard !text.isEmpty else { sendNext(parts, i + 1); return }
-        fillAndSend(text) { _ in
+        fillAndSend(text) { ok in
+            // 这一条没发出（false）：若继续 setText 下一条会覆盖 composer 导致漏发/乱序，故停止剩余逐条发送。
+            guard ok else {
+                NSSound.beep()
+                NSLog("[ZhiYu] sendSequential 第 %d/%d 条未发出，停止后续以避免覆盖/乱序", i + 1, parts.count)
+                return
+            }
             // 上一条发出后留 0.4s 再发下一条（叠加 fillAndSend 内部时序，约 0.8s/条）。
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 sendNext(parts, i + 1)
