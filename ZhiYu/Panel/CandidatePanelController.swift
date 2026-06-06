@@ -2,13 +2,6 @@ import AppKit
 import SwiftUI
 import ZhiYuCore
 
-/// 可成为 key 的悬浮面板：borderless 窗口默认 canBecomeKey=false，覆盖为 true 使其 makeKey 后能稳定收键盘。
-/// 仍配 .nonactivatingPanel 使用——成为 key 接收键盘但不激活 owning App、不抢微信前台。
-/// 不覆盖 canBecomeMain（保持默认 false）。
-private final class KeyCapablePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-}
-
 /// 管理候选悬浮面板：双击触发后 读会话 -> 定位 -> 生成 -> 展示 -> 填入/发送 -> 消失。
 @MainActor
 final class CandidatePanelController: NSObject {
@@ -240,8 +233,7 @@ final class CandidatePanelController: NSObject {
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         self.anchorAXFrame = axFrame
         model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
-        // 必须先关面板释放 key 焦点（把键盘焦点交还微信），否则第一条回车会进 key 面板而非微信。
-        model.onSend = { [weak self] t in self?.dismiss(); Inserter.sendSequential(BubbleSplitter.split(t)) }
+        model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
         model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
         model.onDismiss = { [weak self] in self?.dismiss() }
         // 拖动松手：把面板当前原点相对实时自动锚点的差值记为手动偏移并持久化（跟随微信窗口）。
@@ -259,7 +251,7 @@ final class CandidatePanelController: NSObject {
             self.relayout()
         }
 
-        let p = KeyCapablePanel(contentRect: NSRect(x: 0, y: 0, width: CandidatePanelView.baseWidth, height: 120),
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: CandidatePanelView.baseWidth, height: 120),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.level = .floating
         p.isOpaque = false
@@ -269,9 +261,6 @@ final class CandidatePanelController: NSObject {
         self.panel = p
         relayout()
         p.orderFrontRegardless()
-        // 成为 key 以稳定接收键盘（borderless 默认不能成 key，故子类 override canBecomeKey）；
-        // .nonactivatingPanel 保证成为 key 但不激活本 App、不抢微信前台。
-        p.makeKey()
 
         installKeyMonitor()
     }
@@ -329,10 +318,9 @@ final class CandidatePanelController: NSObject {
     }
 
     /// 面板存活期间的键盘处理：
-    /// - 本地监听：1/2/3 选中、Esc 关闭。面板现已 makeKey 成为 key window，本地监听稳定触发
-    ///   （即便微信在前台、本 App 未激活——nonactivatingPanel 成 key 但不激活 App）。
-    /// - 全局 Esc 监听：作兜底保留（只观察不吞事件，Esc 漏给微信无害）。
-    ///   不再监听"外部点击消失"——别的 app 弹窗点击会误关面板。
+    /// - 本地监听：1/2/3 选中、Esc 关闭（面板恰为 key 时生效）。
+    /// - 全局 Esc 监听：自动弹出时微信在前台、本地监听收不到键，故再加全局 Esc 兜底关闭
+    ///   （只观察不吞事件，Esc 漏给微信无害）。不再监听"外部点击消失"——别的 app 弹窗点击会误关面板。
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel != nil else { return event }
