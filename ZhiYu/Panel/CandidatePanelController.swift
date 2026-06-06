@@ -121,6 +121,7 @@ final class CandidatePanelController: NSObject {
     private func runGeneration(baseContext: ChatContext, imageFrames: [CGRect], style: ReplyStyle, generation: Int) {
         var baseContext = baseContext
         var imageFrames = imageFrames
+        let baseContact = baseContext.contactName  // 转写等待期间用户可能切会话：重读后据此校验，避免串会话
         currentTask = Task {
             do {
                 // 若会话里有"未转文字"的语音 → 取最近 5 条触发转写并等到完成，转写回来后重读。
@@ -130,6 +131,11 @@ final class CandidatePanelController: NSObject {
                     await VoiceTranscriber.transcribeRecentAndWait()
                     if Task.isCancelled { return }  // ESC 已取消：不再重读/生成
                     if let fresh = WeChatReader.readSnapshot() {
+                        // 转写等待期间用户切到了别的会话：放弃本次（用旧上下文生成会发错会话），收掉面板。
+                        guard fresh.context.contactName == baseContact else {
+                            if generation == self.presentGeneration { self.dismiss() }
+                            return
+                        }
                         baseContext = fresh.context
                         imageFrames = fresh.imageFrames
                         if generation == self.presentGeneration {
