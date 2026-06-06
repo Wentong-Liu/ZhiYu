@@ -127,21 +127,17 @@ final class SettingsModel: ObservableObject {
     func logout() { KeychainStore.clearChatGPTTokens(); loggedIn = false; status = "已退出登录" }
 }
 
-/// 黑白灰按钮：filled=true 为主操作（稍亮的灰底），否则次级（更淡）。
-private struct MonoButton: ButtonStyle {
-    var filled: Bool = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.callout)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .foregroundStyle(.white.opacity(0.92))
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(.white.opacity(filled
-                        ? (configuration.isPressed ? 0.26 : 0.18)
-                        : (configuration.isPressed ? 0.12 : 0.06)))
-            )
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.1)))
+/// OpenAI 家族下的凭证方式分段：API Key 还是 ChatGPT 登录。
+/// 取代原先 monoSegment 里的裸字符串 id（"key" / "chatgpt"），与 `openAIUsesChatGPT` 一一对应。
+private enum OpenAIAuthMode: CaseIterable, Identifiable {
+    case apiKey
+    case chatGPT
+    var id: Self { self }
+    var label: String {
+        switch self {
+        case .apiKey:  return "API Key"
+        case .chatGPT: return "ChatGPT 登录"
+        }
     }
 }
 
@@ -188,15 +184,15 @@ struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .provider
 
     /// 隐藏系统标题栏后内容延伸到顶；红绿灯浮在左上角，这里为整窗顶部预留的标题栏高度。
-    private let titleBarInset: CGFloat = 32
+    private let titleBarInset = SettingsTheme.titleBarInset
 
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-            Divider().overlay(.white.opacity(0.08))
+            Divider().overlay(.white.opacity(SettingsTheme.WhiteAlpha.divider))
             VStack(alignment: .leading, spacing: 16) {
                 Text(selectedTab.shortTitle)
-                    .font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(0.95))
+                    .font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.textPrimary))
                 switch selectedTab {
                 case .provider: providerTab
                 case .general:  generalTab
@@ -207,8 +203,8 @@ struct SettingsView: View {
             .padding(.top, titleBarInset)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 720, height: 600)
-        .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
+        .frame(width: SettingsTheme.windowSize.width, height: SettingsTheme.windowSize.height)
+        .background(SettingsTheme.backdrop.ignoresSafeArea())
         .background(WindowConfigurator())
         .environment(\.colorScheme, .dark)
         .onAppear { vm.refreshPermissions() }
@@ -222,12 +218,12 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             // 品牌头放到标题栏那一行，向右挪开红绿灯（leading 内边距让它出现在红绿灯右侧、同一行）。
             HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(.white.opacity(0.12))
+                RoundedRectangle(cornerRadius: SettingsTheme.Radius.control, style: .continuous)
+                    .fill(.white.opacity(SettingsTheme.WhiteAlpha.brandFill))
                     .frame(width: 28, height: 28)
                     .overlay(Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)))
-                Text("知语设置").font(.headline).foregroundStyle(.white.opacity(0.95))
+                        .font(.system(size: 13)).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.glyph)))
+                Text("知语设置").font(.headline).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.textPrimary))
             }
             .padding(.leading, 10)
             .padding(.bottom, 4)
@@ -240,7 +236,7 @@ struct SettingsView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
         .padding(.top, titleBarInset)
-        .frame(width: 200)
+        .frame(width: SettingsTheme.sidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
@@ -250,18 +246,18 @@ struct SettingsView: View {
             Image(systemName: tab.icon)
                 .font(.system(size: 14))
                 .frame(width: 18)
-                .foregroundStyle(selected ? .white.opacity(0.95) : .white.opacity(0.55))
+                .foregroundStyle(selected ? .white.opacity(SettingsTheme.WhiteAlpha.textPrimary) : .white.opacity(SettingsTheme.WhiteAlpha.iconMuted))
             Text(tab.shortTitle)
                 .font(.callout)
-                .foregroundStyle(selected ? .white.opacity(0.95) : .white.opacity(0.7))
+                .foregroundStyle(selected ? .white.opacity(SettingsTheme.WhiteAlpha.textPrimary) : .white.opacity(SettingsTheme.WhiteAlpha.textMuted))
             Spacer()
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(.white.opacity(selected ? 0.1 : 0)))
+        .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.control, style: .continuous)
+            .fill(.white.opacity(selected ? SettingsTheme.WhiteAlpha.rowSelected : 0)))
         .contentShape(Rectangle())
         .onTapGesture { selectedTab = tab }
-        .animation(.easeOut(duration: 0.14), value: selected)
+        .animation(SettingsTheme.rowSelectAnimation, value: selected)
     }
 
     /// 「模型 / Provider」选项卡：provider 卡 + 模型/风格 + 存 Key 的 status 文案。
@@ -315,15 +311,15 @@ struct SettingsView: View {
                                 onAuthorize: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.callout).foregroundStyle(.white.opacity(0.9))
+                Text(name).font(.callout).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.text))
                 Text(desc).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if granted {
                 HStack(spacing: 6) {
-                    Circle().fill(Color.green).frame(width: 8, height: 8)
-                    Text("已授权").font(.callout).foregroundStyle(.white.opacity(0.9))
+                    Circle().fill(SettingsTheme.grantedDot).frame(width: 8, height: 8)
+                    Text("已授权").font(.callout).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.text))
                 }
             } else {
                 Button("去授权", action: onAuthorize).buttonStyle(MonoButton(filled: true))
@@ -331,7 +327,7 @@ struct SettingsView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.card, style: .continuous).fill(.white.opacity(SettingsTheme.WhiteAlpha.cardFill)))
     }
 
     private func sectionHeader(_ t: String) -> some View {
@@ -358,15 +354,15 @@ struct SettingsView: View {
         providerCard(selected: vm.family == .openAI, title: "OpenAI",
                      subtitle: "API Key 或 ChatGPT 订阅登录",
                      onSelect: { vm.family = .openAI }) {
-            monoSegment(options: [("key", "API Key"), ("chatgpt", "ChatGPT 登录")],
-                        selectedID: vm.openAIUsesChatGPT ? "chatgpt" : "key") { id in
-                vm.openAIUsesChatGPT = (id == "chatgpt")
+            monoSegment(options: OpenAIAuthMode.allCases,
+                        selected: vm.openAIUsesChatGPT ? .chatGPT : .apiKey) { mode in
+                vm.openAIUsesChatGPT = (mode == .chatGPT)
             }
             if vm.openAIUsesChatGPT {
                 HStack(spacing: 10) {
                     Label(vm.loggedIn ? "已登录" : "未登录",
                           systemImage: vm.loggedIn ? "checkmark.circle.fill" : "person.crop.circle")
-                        .font(.callout).foregroundStyle(vm.loggedIn ? .white.opacity(0.9) : .secondary)
+                        .font(.callout).foregroundStyle(vm.loggedIn ? .white.opacity(SettingsTheme.WhiteAlpha.text) : .secondary)
                     Spacer()
                     Button(vm.loggedIn ? "重新登录" : "用 ChatGPT 登录") { vm.login() }
                         .buttonStyle(MonoButton(filled: true))
@@ -444,43 +440,44 @@ struct SettingsView: View {
             HStack(spacing: 11) {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 17))
-                    .foregroundStyle(selected ? .white.opacity(0.95) : .white.opacity(0.35))
+                    .foregroundStyle(selected ? .white.opacity(SettingsTheme.WhiteAlpha.textPrimary) : .white.opacity(SettingsTheme.WhiteAlpha.radioOff))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.body.weight(.medium)).foregroundStyle(.white.opacity(0.95))
+                    Text(title).font(.body.weight(.medium)).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.textPrimary))
                     Text(subtitle).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if selected { Text("当前启用").font(.caption2).foregroundStyle(.white.opacity(0.55)) }
+                if selected { Text("当前启用").font(.caption2).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.textFaint)) }
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onSelect)
             if selected { content() }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(.white.opacity(selected ? 0.07 : 0.025)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(.white.opacity(selected ? 0.18 : 0.06), lineWidth: 1))
-        .animation(.easeOut(duration: 0.16), value: selected)
+        .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.providerCard, style: .continuous)
+            .fill(.white.opacity(selected ? SettingsTheme.WhiteAlpha.providerFillOn : SettingsTheme.WhiteAlpha.providerFillOff)))
+        .overlay(RoundedRectangle(cornerRadius: SettingsTheme.Radius.providerCard, style: .continuous)
+            .stroke(.white.opacity(selected ? SettingsTheme.WhiteAlpha.providerStrokeOn : SettingsTheme.WhiteAlpha.providerStrokeOff), lineWidth: 1))
+        .animation(SettingsTheme.providerSelectAnimation, value: selected)
     }
 
-    private func monoSegment(options: [(id: String, label: String)], selectedID: String,
-                             onSelect: @escaping (String) -> Void) -> some View {
+    private func monoSegment(options: [OpenAIAuthMode], selected: OpenAIAuthMode,
+                             onSelect: @escaping (OpenAIAuthMode) -> Void) -> some View {
         HStack(spacing: 4) {
-            ForEach(options, id: \.id) { o in
-                Button { onSelect(o.id) } label: {
+            ForEach(options) { o in
+                Button { onSelect(o) } label: {
                     Text(o.label).font(.caption)
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
-                        .foregroundStyle(selectedID == o.id ? .white : .secondary)
-                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(.white.opacity(selectedID == o.id ? 0.16 : 0)))
+                        .foregroundStyle(selected == o ? .white : .secondary)
+                        .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.segmentItem, style: .continuous)
+                            .fill(.white.opacity(selected == o ? SettingsTheme.WhiteAlpha.segmentSelected : 0)))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.control, style: .continuous)
+            .fill(.white.opacity(SettingsTheme.WhiteAlpha.segmentTrack)))
     }
 
     // MARK: 模型与风格
@@ -502,7 +499,7 @@ struct SettingsView: View {
                     }
                     Text("自定义").tag(vm.styles.count)
                 }
-                .labelsHidden().tint(.white).frame(width: 130)
+                .labelsHidden().tint(.white).frame(width: SettingsTheme.pickerWidth)
             }
             if !vm.currentKind.supportsMultimodal {
                 Text("⚠️ 当前模型不支持多模态，无法识别图片和表情包（图片消息将按纯文本处理）")
@@ -515,8 +512,8 @@ struct SettingsView: View {
                     .frame(height: 84)
                     .scrollContentBackground(.hidden)
                     .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.06)))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.1)))
+                    .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.control, style: .continuous).fill(.white.opacity(SettingsTheme.WhiteAlpha.editorFill)))
+                    .overlay(RoundedRectangle(cornerRadius: SettingsTheme.Radius.control, style: .continuous).stroke(.white.opacity(SettingsTheme.WhiteAlpha.strokeThin)))
                     .overlay(alignment: .topLeading) {
                         if vm.customPrompt.isEmpty {
                             Text("写给大模型的提示词，例如：用我一贯的简短、略带调侃的口吻回复，多用语气词。")
@@ -533,33 +530,33 @@ struct SettingsView: View {
             sectionHeader("触发方式")
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Image(systemName: "command").foregroundStyle(.white.opacity(0.8))
-                    Text("触发快捷键").font(.callout).foregroundStyle(.white.opacity(0.9))
+                    Image(systemName: "command").foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.icon))
+                    Text("触发快捷键").font(.callout).foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.text))
                     Spacer()
                     Picker("", selection: $vm.triggerKey) {
                         ForEach(TriggerKey.allCases) { key in
                             Text(key.label).tag(key)
                         }
                     }
-                    .labelsHidden().tint(.white).frame(width: 130)
+                    .labelsHidden().tint(.white).frame(width: SettingsTheme.pickerWidth)
                 }
                 Text("在微信里 \(vm.triggerKey.label) 唤起候选面板。")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.card, style: .continuous).fill(.white.opacity(SettingsTheme.WhiteAlpha.cardFill)))
 
             VStack(alignment: .leading, spacing: 4) {
                 Toggle("新消息自动生成候选（切到微信前台时弹出）", isOn: $vm.autoOnNewMessage)
                     .toggleStyle(.switch).tint(.white)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.white.opacity(SettingsTheme.WhiteAlpha.text))
                 Text("对方发来新消息时后台预生成；切到微信前台时弹出候选。")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: SettingsTheme.Radius.card, style: .continuous).fill(.white.opacity(SettingsTheme.WhiteAlpha.cardFill)))
         }
     }
 }
