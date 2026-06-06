@@ -48,6 +48,9 @@ final class CandidatePanelController: NSObject {
     private var presentGeneration = 0
     /// 当前在飞的 present 任务：ESC/dismiss 时取消，让转写循环立即停、不再 AXShowMenu/把微信拉前台。
     private var currentTask: Task<Void, Never>?
+    /// 本次面板所针对的会话联系人：落地动作（填入/发送/发表情）前据此校验微信当前会话是否仍一致，避免发错会话。
+    /// dismiss 不清此字段，故 onSendSticker 先 dismiss 后仍能判。
+    private var presentTargetContact: String?
 
     override init() {
         // 从 UserDefaults 读上次拖动后的手动偏移（[Δx, Δy]）；缺省/格式不符则回退 .zero（纯自动定位）。
@@ -86,6 +89,7 @@ final class CandidatePanelController: NSObject {
             NSLog("[ZhiYu] trigger readSnapshot %.0fms", Date().timeIntervalSince(t0) * 1000)
             // 复用记住的位置：读回来只用于出候选，不重定位面板（避免跳动）。位置由首次读取确立、之后靠手动拖动调整。
             self.lastSeenSig[snap.context.contactName] = MessageSignal.signature(snap.context)
+            self.presentTargetContact = snap.context.contactName  // 记本次面板的目标会话，供落地动作校验
             self.runGeneration(baseContext: snap.context, imageFrames: snap.imageFrames, style: AppConfig.shared.currentStyle(), generation: generation)
         }
     }
@@ -96,6 +100,7 @@ final class CandidatePanelController: NSObject {
         let g = beginPresentation(anchor: frame)
         persistAnchor(frame)
         lastSeenSig[snapshot.context.contactName] = MessageSignal.signature(snapshot.context)  // 标记已展示
+        presentTargetContact = snapshot.context.contactName  // 记本次面板的目标会话，供落地动作校验
         runGeneration(baseContext: snapshot.context, imageFrames: snapshot.imageFrames, style: AppConfig.shared.currentStyle(), generation: g)
     }
 
@@ -249,11 +254,19 @@ final class CandidatePanelController: NSObject {
         return WeChatAXProbe.isWeChat(front)
     }
 
+    /// 落地动作前校验微信「当前打开会话」是否仍是本次面板的目标会话。
+    /// 务必默认放行、绝不误拦：无目标/读不到/为空一律放行（return true），只在确读到不同会话才返回 false。
+    private func guardSameConversation() -> Bool {
+        guard let target = presentTargetContact else { return true }
+        guard let cur = WeChatAXProbe.currentContactName()?.trimmingCharacters(in: .whitespacesAndNewlines), !cur.isEmpty else { return true }
+        return cur == target.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         self.anchorAXFrame = axFrame
-        model.onFill = { [weak self] t in Inserter.fill(t); self?.dismiss() }
-        model.onSend = { [weak self] t in Inserter.sendSequential(BubbleSplitter.split(t)); self?.dismiss() }
-        model.onSendSticker = { [weak self] kw in self?.dismiss(); StickerSender.send(keyword: kw) }
+        model.onFill = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.fill(t) } else { NSSound.beep() }; self.dismiss() }
+        model.onSend = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.sendSequential(BubbleSplitter.split(t)) } else { NSSound.beep() }; self.dismiss() }
+        model.onSendSticker = { [weak self] kw in guard let self else { return }; self.dismiss(); if self.guardSameConversation() { StickerSender.send(keyword: kw) } else { NSSound.beep() } }
         model.onDismiss = { [weak self] in self?.dismiss() }
         // 拖动松手：把面板当前原点相对实时自动锚点的差值记为手动偏移并持久化（跟随微信窗口）。
         model.onDragMoved = { [weak self] in

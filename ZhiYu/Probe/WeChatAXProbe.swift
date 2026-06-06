@@ -225,6 +225,18 @@ enum WeChatAXProbe {
         return "\(rows.count)|\(lastText)"
     }
 
+    /// 极轻量地读取「当前打开会话」的联系人标题：复用 findWeChatApp→focusedOrMainWindow→右侧面板顶部 StaticText
+    /// （locateContactTitle/collectTopStaticTexts，只读顶部 StaticText、不下钻消息表/不截图，开销低于 cheapSignature）。
+    /// 供落地动作前校验会话身份用。读不到（无权限/无窗口/无右侧面板）返回 nil。
+    static func currentContactName() -> String? {
+        guard AXIsProcessTrusted(), let app = findWeChatApp() else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        guard let window = focusedOrMainWindow(of: appElement) else { return nil }
+        var diag: [String] = []
+        guard let panel = locateRightPanel(window: window, diagnostics: &diag) else { return nil }
+        return locateContactTitle(in: panel)
+    }
+
     /// 定位右侧会话面板：
     /// 1) 在窗口浅层子节点里找 role==AXSplitGroup 的主 split group。
     /// 2) 在主 split group 的【直接子节点】里找 role==AXSplitGroup 的那个作为右侧面板。
