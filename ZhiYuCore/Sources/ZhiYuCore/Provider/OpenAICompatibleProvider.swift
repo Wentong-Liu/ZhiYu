@@ -5,7 +5,6 @@ public struct OpenAICompatibleProvider: LLMProvider {
     private let config: ProviderConfig
     private let apiKey: String
     private let session: URLSession
-    private let extraHeaders: [String: String]
     /// 是否把图片发给模型。OpenAI（gpt-4o 等支持视觉）传 true；DeepSeek（纯文本）保持 false。
     private let sendsImages: Bool
 
@@ -13,11 +12,10 @@ public struct OpenAICompatibleProvider: LLMProvider {
     private static let requestTimeout: TimeInterval = 60
 
     public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared,
-                extraHeaders: [String: String] = [:], sendsImages: Bool = false) {
+                sendsImages: Bool = false) {
         self.config = config
         self.apiKey = apiKey
         self.session = session
-        self.extraHeaders = extraHeaders
         self.sendsImages = sendsImages
     }
 
@@ -69,7 +67,6 @@ public struct OpenAICompatibleProvider: LLMProvider {
         req.timeoutInterval = Self.requestTimeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
         let wire = messages.map {
             WireMessage(role: $0.role.rawValue, content: Self.wireContent(for: $0, sendsImages: sendsImages))
         }

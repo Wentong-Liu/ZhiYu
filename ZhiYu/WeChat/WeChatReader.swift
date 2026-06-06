@@ -40,16 +40,6 @@ enum WeChatReader {
         ChatContext(contactName: base.contactName, messages: base.messages, draft: base.draft, imageDataURLs: urls)
     }
 
-    /// 返回当前会话上下文；读不到返回 nil。
-    static func readCurrentContext() -> ChatContext? {
-        readSnapshot()?.context
-    }
-
-    /// 当前会话输入框的屏幕 frame（AX 左上原点坐标），读不到返回 nil。
-    static func composerFrame() -> CGRect? {
-        readSnapshot()?.composerFrame
-    }
-
     /// 把探针结果映射为 ChatContext（时间/系统分隔行不进上下文）。
     private static func context(from r: WeChatAXProbe.ProbeResult) -> ChatContext {
         let msgs: [ChatMessage] = r.messages.compactMap { m in

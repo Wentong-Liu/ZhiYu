@@ -43,9 +43,6 @@ enum WeChatAXProbe {
     private static let collectLeafValuesMaxVisited = 6000
     /// 可编辑元素递归收集的深度上限。
     private static let collectEditablesMaxDepth = 60
-    /// 全树 dump（诊断·慢）的节点数与深度上限。
-    private static let dumpTreeMaxNodes = 2000
-    private static let dumpTreeMaxDepth = 60
     /// composer 宽度门槛，排除左上角窄搜索框。
     private static let minComposerWidth: CGFloat = 120
 
@@ -173,7 +170,7 @@ enum WeChatAXProbe {
         if let table = messageTable {
             messages = readMessages(from: table, diagnostics: &diagnostics)
         } else {
-            diagnostics.append("未定位到消息列表（结构可能已变），请用『完整结构树（诊断·慢）』诊断")
+            diagnostics.append("未定位到消息列表（结构可能已变）")
         }
 
         // f. composer：读 AXValue=草稿、frame、AXFocused。
@@ -625,67 +622,5 @@ enum WeChatAXProbe {
     static func rightPanelRoot(window: AXUIElement) -> AXUIElement {
         var diag: [String] = []
         return locateRightPanel(window: window, diagnostics: &diag) ?? window
-    }
-
-    // MARK: - 完整结构树 dump（诊断·慢，单独按钮专用，正常路径不调用）
-
-    /// 全树结构 dump：缩进(depth) + AXRole(+AXSubrole) + frame + (AXValue 或 AXTitle，截断 40 字，换行替换 ⏎)。
-    /// 深度上限 60、节点上限 2000，防止爆栈/爆量。会遍历左侧巨表，仅供诊断手动触发。
-    static func dumpFullTree() -> Result<[String], ProbeError> {
-        guard AXIsProcessTrusted() else { return .failure(.noPermission) }
-        guard let app = findWeChatApp() else { return .failure(.weChatNotRunning) }
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        wakeAccessibility(appElement)
-        guard let window = focusedOrMainWindow(of: appElement) else {
-            return .failure(.noWindow)
-        }
-        var lines: [String] = []
-        var nodeCount = 0
-        dumpTree(window, depth: 0, lines: &lines, nodeCount: &nodeCount)
-        return .success(lines)
-    }
-
-    private static func dumpTree(_ el: AXUIElement,
-                                 depth: Int,
-                                 lines: inout [String],
-                                 nodeCount: inout Int) {
-        guard nodeCount < dumpTreeMaxNodes, depth < dumpTreeMaxDepth else { return }
-        nodeCount += 1
-
-        let r = role(el)
-        var roleStr = r.isEmpty ? "(无Role)" : r
-        if let sub = copyString(el, "AXSubrole"), !sub.isEmpty {
-            roleStr += "/\(sub)"
-        }
-
-        let frameStr: String
-        if let f = frame(of: el) {
-            frameStr = "(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))"
-        } else {
-            frameStr = "(no-frame)"
-        }
-
-        // 优先 AXValue，否则 AXTitle。
-        var label = ""
-        if let v = copyString(el, "AXValue"), !v.isEmpty {
-            label = v
-        } else if let t = copyString(el, "AXTitle"), !t.isEmpty {
-            label = t
-        }
-        if !label.isEmpty {
-            label = label.replacingOccurrences(of: "\n", with: "⏎")
-                         .replacingOccurrences(of: "\r", with: "⏎")
-            if label.count > 40 {
-                label = String(label.prefix(40)) + "…"
-            }
-            label = "  「\(label)」"
-        }
-
-        let indent = String(repeating: "  ", count: depth)
-        lines.append("\(indent)\(roleStr) \(frameStr)\(label)")
-
-        for child in children(el) {
-            dumpTree(child, depth: depth + 1, lines: &lines, nodeCount: &nodeCount)
-        }
     }
 }

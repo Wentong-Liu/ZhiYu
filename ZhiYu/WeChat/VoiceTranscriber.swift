@@ -81,14 +81,6 @@ enum VoiceTranscriber {
         NSLog("[VoiceTranscriber] 触发转文字 %d/%d 条，等待转写落地完成", pressed.count, targets.count)
     }
 
-    /// 当前是否有已加载的未转语音（便于调用方决定是否走转写流程）。
-    static func hasUnconvertedLoaded() -> Bool {
-        guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { return false }
-        let appEl = AXUIElementCreateApplication(app.processIdentifier)
-        guard let window = WeChatAXProbe.focusedOrMainWindow(of: appEl) else { return false }
-        return !unconvertedVoices(in: WeChatAXProbe.rightPanelRoot(window: window)).isEmpty
-    }
-
     // MARK: - 单条触发
 
     private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
