@@ -5,12 +5,6 @@ import ZhiYuCore
 /// 极简 Keychain 读写（generic password）。存各 Provider 的 API Key（OpenAI/DeepSeek/Anthropic/GLM/Kimi/MiniMax）与 ChatGPT OAuthTokens。
 enum KeychainStore {
     static let service = "com.liuwentong.ZhiYu"
-    static let openAIKeyAccount = "openai.apiKey"
-    static let deepSeekKeyAccount = "deepseek.apiKey"
-    static let anthropicKeyAccount = "anthropic.apiKey"
-    static let glmKeyAccount = "glm.apiKey"
-    static let kimiKeyAccount = "kimi.apiKey"
-    static let minimaxKeyAccount = "minimax.apiKey"
     static let chatGPTTokensAccount = "chatgpt.oauthTokens"
 
     /// 写入凭证。返回是否真正写入成功（SecItemAdd 的 OSStatus == errSecSuccess）。
@@ -46,29 +40,20 @@ enum KeychainStore {
         return s
     }
 
-    static func openAIKey() -> String { get(account: openAIKeyAccount) ?? "" }
-    @discardableResult
-    static func setOpenAIKey(_ v: String) -> Bool { set(v, account: openAIKeyAccount) }
+    /// 统一入口：按 ProviderKind 读 API Key。account 名取自 ProviderKind.keychainAccount（单一真相源）。
+    /// chatGPT 走 OAuth token（saveChatGPTTokens / loadChatGPTTokens），无 API Key，返回空串。
+    static func apiKey(for kind: ProviderKind) -> String {
+        guard let account = kind.keychainAccount else { return "" }
+        return get(account: account) ?? ""
+    }
 
-    static func deepSeekKey() -> String { get(account: deepSeekKeyAccount) ?? "" }
+    /// 统一入口：按 ProviderKind 写 API Key。返回是否真正写入成功。
+    /// chatGPT 无 API Key，直接视为成功（不写）。
     @discardableResult
-    static func setDeepSeekKey(_ v: String) -> Bool { set(v, account: deepSeekKeyAccount) }
-
-    static func anthropicKey() -> String { get(account: anthropicKeyAccount) ?? "" }
-    @discardableResult
-    static func setAnthropicKey(_ v: String) -> Bool { set(v, account: anthropicKeyAccount) }
-
-    static func glmKey() -> String { get(account: glmKeyAccount) ?? "" }
-    @discardableResult
-    static func setGLMKey(_ v: String) -> Bool { set(v, account: glmKeyAccount) }
-
-    static func kimiKey() -> String { get(account: kimiKeyAccount) ?? "" }
-    @discardableResult
-    static func setKimiKey(_ v: String) -> Bool { set(v, account: kimiKeyAccount) }
-
-    static func minimaxKey() -> String { get(account: minimaxKeyAccount) ?? "" }
-    @discardableResult
-    static func setMinimaxKey(_ v: String) -> Bool { set(v, account: minimaxKeyAccount) }
+    static func setAPIKey(_ v: String, for kind: ProviderKind) -> Bool {
+        guard let account = kind.keychainAccount else { return true }
+        return set(v, account: account)
+    }
 
     /// 写入 ChatGPT OAuth tokens。返回是否真正写入成功（编码失败或 Keychain 写入失败均为 false）。
     @discardableResult

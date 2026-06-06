@@ -11,6 +11,30 @@ enum ProviderFamily: String, CaseIterable, Identifiable {
     case kimi = "Kimi"
     case minimax = "MiniMax"
     var id: String { rawValue }
+
+    /// 该家族对应的 ProviderKind。openAI 家族取「非 ChatGPT」的 .openAI（ChatGPT 子选择在 SettingsModel.currentKind 处理）。
+    var defaultKind: ProviderKind {
+        switch self {
+        case .openAI:    return .openAI
+        case .deepSeek:  return .deepSeek
+        case .anthropic: return .anthropic
+        case .glm:       return .glm
+        case .kimi:      return .kimi
+        case .minimax:   return .minimax
+        }
+    }
+
+    /// 由 ProviderKind 反推家族。.chatGPT 归入 OpenAI 家族（与 openAIUsesChatGPT 配合）。
+    init(kind: ProviderKind) {
+        switch kind {
+        case .deepSeek:  self = .deepSeek
+        case .anthropic: self = .anthropic
+        case .glm:       self = .glm
+        case .kimi:      self = .kimi
+        case .minimax:   self = .minimax
+        case .openAI, .chatGPT: self = .openAI
+        }
+    }
 }
 
 @MainActor
@@ -41,26 +65,13 @@ final class SettingsModel: ObservableObject {
 
     /// 家族 + OpenAI 子选择 -> 实际 ProviderKind。
     var currentKind: ProviderKind {
-        switch family {
-        case .deepSeek: return .deepSeek
-        case .anthropic: return .anthropic
-        case .glm: return .glm
-        case .kimi: return .kimi
-        case .minimax: return .minimax
-        case .openAI: return openAIUsesChatGPT ? .chatGPT : .openAI
-        }
+        if family == .openAI { return openAIUsesChatGPT ? .chatGPT : .openAI }
+        return family.defaultKind
     }
 
     init() {
         let k = AppConfig.shared.providerKind
-        switch k {
-        case .deepSeek: family = .deepSeek
-        case .anthropic: family = .anthropic
-        case .glm: family = .glm
-        case .kimi: family = .kimi
-        case .minimax: family = .minimax
-        default: family = .openAI
-        }
+        family = ProviderFamily(kind: k)
         openAIUsesChatGPT = (k == .chatGPT)
         let valid = k.modelOptions.map(\.id)
         model = valid.contains(AppConfig.shared.model) ? AppConfig.shared.model : k.defaultModel
@@ -68,15 +79,7 @@ final class SettingsModel: ObservableObject {
         autoOnNewMessage = AppConfig.shared.autoOnNewMessage
         triggerKey = AppConfig.shared.triggerKey
         customPrompt = ""
-        switch k {
-        case .openAI: apiKey = KeychainStore.openAIKey()
-        case .deepSeek: apiKey = KeychainStore.deepSeekKey()
-        case .anthropic: apiKey = KeychainStore.anthropicKey()
-        case .glm: apiKey = KeychainStore.glmKey()
-        case .kimi: apiKey = KeychainStore.kimiKey()
-        case .minimax: apiKey = KeychainStore.minimaxKey()
-        case .chatGPT: apiKey = ""
-        }
+        apiKey = KeychainStore.apiKey(for: k)
         customPrompt = AppConfig.shared.customPrompt
     }
 
@@ -85,35 +88,17 @@ final class SettingsModel: ObservableObject {
         let k = currentKind
         AppConfig.shared.providerKind = k
         model = k.defaultModel
-        switch k {
-        case .openAI: apiKey = KeychainStore.openAIKey()
-        case .deepSeek: apiKey = KeychainStore.deepSeekKey()
-        case .anthropic: apiKey = KeychainStore.anthropicKey()
-        case .glm: apiKey = KeychainStore.glmKey()
-        case .kimi: apiKey = KeychainStore.kimiKey()
-        case .minimax: apiKey = KeychainStore.minimaxKey()
-        case .chatGPT: apiKey = ""
-        }
+        apiKey = KeychainStore.apiKey(for: k)
         loggedIn = KeychainStore.loadChatGPTTokens() != nil
     }
 
     func saveKey() {
+        let kind = currentKind
+        guard kind != .chatGPT else { return }
         let k = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch currentKind {
-        case .openAI:
-            status = KeychainStore.setOpenAIKey(k) ? "已保存 OpenAI Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
-        case .deepSeek:
-            status = KeychainStore.setDeepSeekKey(k) ? "已保存 DeepSeek Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
-        case .anthropic:
-            status = KeychainStore.setAnthropicKey(k) ? "已保存 Anthropic Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
-        case .glm:
-            status = KeychainStore.setGLMKey(k) ? "已保存 智谱GLM Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
-        case .kimi:
-            status = KeychainStore.setKimiKey(k) ? "已保存 Kimi Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
-        case .minimax:
-            status = KeychainStore.setMinimaxKey(k) ? "已保存 MiniMax Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
-        case .chatGPT: break
-        }
+        status = KeychainStore.setAPIKey(k, for: kind)
+            ? "已保存 \(kind.displayName) Key"
+            : "保存失败：无法写入钥匙串，请检查权限后重试"
     }
     func login() {
         status = "正在打开浏览器登录…"
@@ -351,7 +336,7 @@ struct SettingsView: View {
     }
 
     private var openAIRow: some View {
-        providerCard(selected: vm.family == .openAI, title: "OpenAI",
+        providerCard(selected: vm.family == .openAI, title: ProviderFamily.openAI.defaultKind.displayName,
                      subtitle: "API Key 或 ChatGPT 订阅登录",
                      onSelect: { vm.family = .openAI }) {
             monoSegment(options: OpenAIAuthMode.allCases,
@@ -378,7 +363,7 @@ struct SettingsView: View {
     }
 
     private var deepSeekRow: some View {
-        providerCard(selected: vm.family == .deepSeek, title: "DeepSeek",
+        providerCard(selected: vm.family == .deepSeek, title: ProviderFamily.deepSeek.defaultKind.displayName,
                      subtitle: "API Key",
                      onSelect: { vm.family = .deepSeek }) {
             HStack(spacing: 10) {
@@ -389,7 +374,7 @@ struct SettingsView: View {
     }
 
     private var anthropicRow: some View {
-        providerCard(selected: vm.family == .anthropic, title: "Anthropic",
+        providerCard(selected: vm.family == .anthropic, title: ProviderFamily.anthropic.defaultKind.displayName,
                      subtitle: "Claude · API Key",
                      onSelect: { vm.family = .anthropic }) {
             HStack(spacing: 10) {
@@ -400,7 +385,7 @@ struct SettingsView: View {
     }
 
     private var glmRow: some View {
-        providerCard(selected: vm.family == .glm, title: "智谱GLM",
+        providerCard(selected: vm.family == .glm, title: ProviderFamily.glm.defaultKind.displayName,
                      subtitle: "API Key",
                      onSelect: { vm.family = .glm }) {
             HStack(spacing: 10) {
@@ -411,7 +396,7 @@ struct SettingsView: View {
     }
 
     private var kimiRow: some View {
-        providerCard(selected: vm.family == .kimi, title: "Kimi",
+        providerCard(selected: vm.family == .kimi, title: ProviderFamily.kimi.defaultKind.displayName,
                      subtitle: "API Key",
                      onSelect: { vm.family = .kimi }) {
             HStack(spacing: 10) {
@@ -422,7 +407,7 @@ struct SettingsView: View {
     }
 
     private var minimaxRow: some View {
-        providerCard(selected: vm.family == .minimax, title: "MiniMax",
+        providerCard(selected: vm.family == .minimax, title: ProviderFamily.minimax.defaultKind.displayName,
                      subtitle: "API Key",
                      onSelect: { vm.family = .minimax }) {
             HStack(spacing: 10) {

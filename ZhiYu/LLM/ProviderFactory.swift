@@ -1,42 +1,38 @@
 import Foundation
 import ZhiYuCore
 
-/// 由当前配置构造一个 LLMProvider。ChatGPT 走 OAuth token；OpenAI/DeepSeek/Anthropic/智谱GLM/Kimi/MiniMax 走 Keychain key。
+/// 由当前配置构造一个 LLMProvider。数据驱动：读 ProviderKind.transport / providerConfig / keychainAccount。
+/// ChatGPT 走 OAuth token；其余走 Keychain key（OpenAI 发图、DeepSeek/智谱GLM/Kimi/MiniMax 纯文本、Anthropic 走 Anthropic API）。
 @MainActor
 enum ProviderFactory {
     static func make() async throws -> any LLMProvider {
         let cfg = AppConfig.shared
-        switch cfg.providerKind {
-        case .openAI:
-            let k = KeychainStore.openAIKey().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .openAI(model: cfg.model), apiKey: k, sendsImages: true)
-        case .deepSeek:
-            let k = KeychainStore.deepSeekKey().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .deepSeek(model: cfg.model), apiKey: k)
+        let kind = cfg.providerKind
+
+        switch kind.transport {
+        case .openAICompatible(let sendsImages):
+            let config = try keyedConfig(for: kind, model: cfg.model)
+            return OpenAICompatibleProvider(config: config.config, apiKey: config.apiKey, sendsImages: sendsImages)
         case .anthropic:
-            let k = KeychainStore.anthropicKey().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return AnthropicProvider(config: .anthropic(model: cfg.model), apiKey: k)
-        case .glm:
-            let k = KeychainStore.glmKey().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .glm(model: cfg.model), apiKey: k)
-        case .kimi:
-            let k = KeychainStore.kimiKey().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .kimi(model: cfg.model), apiKey: k)
-        case .minimax:
-            let k = KeychainStore.minimaxKey().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
-            return OpenAICompatibleProvider(config: .minimax(model: cfg.model), apiKey: k)
-        case .chatGPT:
+            let config = try keyedConfig(for: kind, model: cfg.model)
+            return AnthropicProvider(config: config.config, apiKey: config.apiKey)
+        case .codexOAuth:
             guard let tokens = await CodexLoginService.shared.validTokens() else {
                 throw ProviderError.missingAPIKey
             }
             return CodexResponsesProvider(accessToken: tokens.accessToken,
                                           accountId: tokens.accountId, model: cfg.model)
         }
+    }
+
+    /// 取该 Provider 的 ProviderConfig 与已修整的 Keychain key；key 为空抛 missingAPIKey。
+    /// 仅用于走 Keychain 的（openAICompatible / anthropic）传输方式。
+    private static func keyedConfig(for kind: ProviderKind, model: String)
+        throws -> (config: ProviderConfig, apiKey: String) {
+        let key = KeychainStore.apiKey(for: kind).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, let config = kind.providerConfig(model: model) else {
+            throw ProviderError.missingAPIKey
+        }
+        return (config, key)
     }
 }

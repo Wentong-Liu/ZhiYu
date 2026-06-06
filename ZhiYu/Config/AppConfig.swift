@@ -1,6 +1,17 @@
 import Foundation
 import ZhiYuCore
 
+/// 一个 Provider 的「传输方式」：决定 ProviderFactory 构造哪种 LLMProvider、是否发图。
+/// 把原先散在 ProviderFactory 里的 6 个近同分支收敛成数据，由 ProviderKind.transport 描述。
+enum ProviderTransport {
+    /// OpenAI 兼容（chat/completions）。`sendsImages` 决定是否把图片发给模型。
+    case openAICompatible(sendsImages: Bool)
+    /// Anthropic messages API。
+    case anthropic
+    /// ChatGPT 订阅登录（Codex OAuth，走 token 而非 Keychain key）。
+    case codexOAuth
+}
+
 enum ProviderKind: String, CaseIterable, Identifiable {
     case openAI = "OpenAI"
     case deepSeek = "DeepSeek"
@@ -10,6 +21,53 @@ enum ProviderKind: String, CaseIterable, Identifiable {
     case minimax = "MiniMax"
     case chatGPT = "ChatGPT 登录"
     var id: String { rawValue }
+
+    // MARK: 单一 descriptor —— per-provider 元数据收口在此
+
+    /// 该 Provider 的连接配置（name/baseURL/model）。chatGPT 走 OAuth，无静态 ProviderConfig，返回 nil。
+    /// 复用 ZhiYuCore 里既有的 ProviderConfig 工厂，name/baseURL 保持完全一致（不另起字面量）。
+    func providerConfig(model: String) -> ProviderConfig? {
+        switch self {
+        case .openAI:    return .openAI(model: model)
+        case .deepSeek:  return .deepSeek(model: model)
+        case .anthropic: return .anthropic(model: model)
+        case .glm:       return .glm(model: model)
+        case .kimi:      return .kimi(model: model)
+        case .minimax:   return .minimax(model: model)
+        case .chatGPT:   return nil
+        }
+    }
+
+    /// 该 Provider 在 Keychain 里存 API Key 用的 account 名。chatGPT 走 OAuth token（另存），返回 nil。
+    /// 字符串名是落盘账户名，**改了会读不到已存 Key**，必须与历史完全一致。
+    var keychainAccount: String? {
+        switch self {
+        case .openAI:    return "openai.apiKey"
+        case .deepSeek:  return "deepseek.apiKey"
+        case .anthropic: return "anthropic.apiKey"
+        case .glm:       return "glm.apiKey"
+        case .kimi:      return "kimi.apiKey"
+        case .minimax:   return "minimax.apiKey"
+        case .chatGPT:   return nil
+        }
+    }
+
+    /// 传输方式：ProviderFactory 据此选 Provider 类型与是否发图。
+    /// openAI 发图（gpt-4o 系多模态）；deepSeek/glm/kimi/minimax 纯文本；anthropic 走 Anthropic；chatGPT 走 Codex OAuth。
+    var transport: ProviderTransport {
+        switch self {
+        case .openAI:    return .openAICompatible(sendsImages: true)
+        case .deepSeek, .glm, .kimi, .minimax: return .openAICompatible(sendsImages: false)
+        case .anthropic: return .anthropic
+        case .chatGPT:   return .codexOAuth
+        }
+    }
+
+    /// 展示名单一真相源：6 个 key 型 Provider 直接取其 ProviderConfig.name（与 baseURL 同源，避免「智谱GLM」等重复字面量）；
+    /// chatGPT 无 ProviderConfig，用其 rawValue（"ChatGPT 登录"）。SettingsView 标题、ProviderConfig.name 均由此派生。
+    var displayName: String {
+        providerConfig(model: "").map(\.name) ?? rawValue
+    }
 
     /// 该 Provider 可选模型：(id 发给 API, label 展示)。
     var modelOptions: [(id: String, label: String)] {
