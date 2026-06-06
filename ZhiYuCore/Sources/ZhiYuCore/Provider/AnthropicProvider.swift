@@ -28,27 +28,12 @@ public struct AnthropicProvider: LLMProvider {
         let data: String
     }
 
+    /// 图片块的 leaf：编为 `{"type":"image","source":{...}}`。
+    private struct ImageBlock: Encodable { let type = "image"; let source: WireImageSource }
+
     /// 一条 message 的 content：要么是纯字符串，要么是内容块数组（文本块 + 图片块）。
-    /// 用自定义 Encodable 表达这种多态。
-    private enum WireContent: Encodable {
-        case text(String)
-        case blocks(text: String, images: [WireImageSource])
-
-        func encode(to encoder: Encoder) throws {
-            switch self {
-            case let .text(s):
-                var c = encoder.singleValueContainer()
-                try c.encode(s)
-            case let .blocks(text, images):
-                var c = encoder.unkeyedContainer()
-                try c.encode(TextBlock(text: text))
-                for img in images { try c.encode(ImageBlock(source: img)) }
-            }
-        }
-
-        private struct TextBlock: Encodable { let type = "text"; let text: String }
-        private struct ImageBlock: Encodable { let type = "image"; let source: WireImageSource }
-    }
+    /// 多态骨架（string OR [text-block, image-blocks...]）由 MultipartContent 提供；本类型只给出自己的 image leaf。
+    private typealias WireContent = MultipartContent<ImageBlock>
 
     private struct WireMessage: Encodable { let role: String; let content: WireContent }
 
@@ -124,9 +109,9 @@ public struct AnthropicProvider: LLMProvider {
 
     /// 把一条 LLMMessage 转成线上 content：无图直接字符串，有图则「文本块 + 图片块数组」。
     private static func wireContent(for msg: LLMMessage) -> WireContent {
-        let images = msg.imageDataURLs.compactMap(parseDataURL)
-        if images.isEmpty { return .text(msg.content) }
-        return .blocks(text: msg.content, images: images)
+        let blocks = msg.imageDataURLs.compactMap(parseDataURL).map(ImageBlock.init(source:))
+        if blocks.isEmpty { return .text(msg.content) }
+        return .parts(text: msg.content, images: blocks)
     }
 
     /// 解析 "data:image/png;base64,XXXX" 形式：取 data: 与 ;base64 之间为 media_type、逗号后为 base64。

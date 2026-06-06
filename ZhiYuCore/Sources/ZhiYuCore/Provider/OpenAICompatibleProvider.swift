@@ -21,31 +21,17 @@ public struct OpenAICompatibleProvider: LLMProvider {
         self.sendsImages = sendsImages
     }
 
-    /// 一条 message 的 content：要么纯字符串（无图/不发图），要么 parts 数组（文本 part + 每张图一个 image_url part）。
-    /// 用自定义 Encodable 表达这种多态——纯字符串分支与旧行为逐字节一致。
-    private enum WireContent: Encodable {
-        case text(String)
-        case parts(text: String, imageURLs: [String])
-
-        func encode(to encoder: Encoder) throws {
-            switch self {
-            case let .text(s):
-                var c = encoder.singleValueContainer()
-                try c.encode(s)
-            case let .parts(text, imageURLs):
-                var c = encoder.unkeyedContainer()
-                try c.encode(TextPart(text: text))
-                for url in imageURLs { try c.encode(ImagePart(image_url: .init(url: url))) }
-            }
-        }
-
-        private struct TextPart: Encodable { let type = "text"; let text: String }
-        private struct ImagePart: Encodable {
-            struct URLBox: Encodable { let url: String }
-            let type = "image_url"
-            let image_url: URLBox
-        }
+    /// 图片 part 的 leaf：编为 `{"type":"image_url","image_url":{"url":...}}`，url 直接用 dataURL。
+    private struct ImagePart: Encodable {
+        struct URLBox: Encodable { let url: String }
+        let type = "image_url"
+        let image_url: URLBox
     }
+
+    /// 一条 message 的 content：要么纯字符串（无图/不发图），要么 parts 数组（文本 part + 每张图一个 image_url part）。
+    /// 多态骨架（string OR [text-part, image-parts...]）由 MultipartContent 提供；本类型只给出自己的 image_url leaf。
+    /// 纯字符串分支与旧行为逐字节一致。
+    private typealias WireContent = MultipartContent<ImagePart>
 
     /// 发给 chat/completions 的线上消息（content 可为字符串或 parts 数组）。
     private struct WireMessage: Encodable { let role: String; let content: WireContent }
@@ -99,7 +85,8 @@ public struct OpenAICompatibleProvider: LLMProvider {
     /// 否则编码为纯字符串（与旧行为逐字节一致）。
     private static func wireContent(for msg: LLMMessage, sendsImages: Bool) -> WireContent {
         if sendsImages, !msg.imageDataURLs.isEmpty {
-            return .parts(text: msg.content, imageURLs: msg.imageDataURLs)
+            let parts = msg.imageDataURLs.map { ImagePart(image_url: .init(url: $0)) }
+            return .parts(text: msg.content, images: parts)
         }
         return .text(msg.content)
     }
