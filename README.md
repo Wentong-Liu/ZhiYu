@@ -10,6 +10,8 @@
 ![swift](https://img.shields.io/badge/Swift-6-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
+**[⬇️ 下载最新版 ZhiYu.dmg](https://github.com/Wentong-Liu/ZhiYu/releases/latest/download/ZhiYu.dmg)** · [所有版本](https://github.com/Wentong-Liu/ZhiYu/releases)
+
 </div>
 
 知语是一款常驻 macOS 菜单栏的微信回复助手。它通过系统**辅助功能（Accessibility）**读取当前打开的微信会话，调用你所配置的大模型生成若干候选回复，供你一键填入输入框或直接发送。全部处理均在本机完成，**不经过任何中间服务器**。
@@ -44,6 +46,16 @@
 <img src="docs/images/screenshot-panel.png" width="540" alt="候选回复面板" />
 
 </div>
+
+## ⬇️ 下载
+
+从 [**Releases**](https://github.com/Wentong-Liu/ZhiYu/releases/latest) 下载最新的 **`ZhiYu.dmg`**（已 Developer ID 签名并经 Apple 公证，macOS 15+ 双击即可打开，无 Gatekeeper 警告）。
+
+1. 打开 DMG，将 **知语 ZhiYu** 拖入「应用程序」并启动（常驻菜单栏，无 Dock 图标）。
+2. 在 **设置 → 通用 → 权限** 授予「辅助功能」（读取微信会话、模拟输入必需）；需要图片识别再授予「屏幕录制」。
+3. 在 **设置 → 模型** 选择 Provider 并填入 API Key（或用 ChatGPT 登录），即可双击触发键唤起候选面板。
+
+> 想自行编译，见下方「快速开始」。
 
 ## 🚀 快速开始
 
