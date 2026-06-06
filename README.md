@@ -6,7 +6,7 @@
 
 **macOS 菜单栏中的微信回复助手** —— 理解当前会话，借助大模型生成候选回复，一键填入或发送。
 
-![platform](https://img.shields.io/badge/platform-macOS%2014%2B-black)
+![platform](https://img.shields.io/badge/platform-macOS%2015%2B-black)
 ![swift](https://img.shields.io/badge/Swift-6-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
