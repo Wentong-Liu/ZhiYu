@@ -14,6 +14,9 @@ public enum ChatGPTOAuth {
     public static let scope = "openid profile email offline_access"
     /// 协议 originator（单一真相源，供授权 URL、Responses header、User-Agent 派生复用）。
     public static let originator = "openclaw"
+    /// token 响应缺省 expires_in 时的兜底有效期（秒）。
+    /// 注意须远大于 OAuthTokens.expiryLeeway，否则刚拿到的 token 会立即被判过期。
+    public static let defaultExpiresIn: Double = 3600
 
     public static func authorizeURL(pkce: PKCE, state: String) -> URL {
         var c = URLComponents(string: authorizeEndpoint)!
@@ -58,7 +61,7 @@ public enum ChatGPTOAuth {
             refreshToken: r.refresh_token ?? fallbackRefresh,
             idToken: r.id_token ?? "",
             accountId: accountId,
-            expiresAt: Date().addingTimeInterval(r.expires_in ?? 3600))
+            expiresAt: Date().addingTimeInterval(r.expires_in ?? defaultExpiresIn))
     }
 
     /// 解 JWT payload，取 ["https://api.openai.com/auth"]["chatgpt_account_id"]。

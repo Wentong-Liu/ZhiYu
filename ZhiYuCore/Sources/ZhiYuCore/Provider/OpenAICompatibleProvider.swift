@@ -11,7 +11,7 @@ public struct OpenAICompatibleProvider: LLMProvider {
     private let sendsImages: Bool
 
     /// 单次请求超时（秒）。非流式 chat/completions 一次性返回，给足整体上限即可。
-    private static let requestTimeout: TimeInterval = 60
+    private static let requestTimeout = LLMDefaults.requestTimeout
 
     public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared,
                 sendsImages: Bool = false) {
@@ -73,7 +73,7 @@ public struct OpenAICompatibleProvider: LLMProvider {
             WireMessage(role: $0.role.rawValue, content: Self.wireContent(for: $0, sendsImages: sendsImages))
         }
         req.httpBody = try JSONEncoder().encode(
-            RequestBody(model: config.model, messages: wire, temperature: 0.9))
+            RequestBody(model: config.model, messages: wire, temperature: LLMDefaults.temperature))
 
         let data: Data
         let response: URLResponse

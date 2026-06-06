@@ -9,7 +9,7 @@ public struct AnthropicProvider: LLMProvider {
     private let session: URLSession
 
     /// 单次请求超时（秒）。非流式 messages 一次性返回，给足整体上限即可。
-    private static let requestTimeout: TimeInterval = 60
+    private static let requestTimeout = LLMDefaults.requestTimeout
     /// Anthropic API 版本头（固定）。
     private static let apiVersion = "2023-06-01"
 
@@ -98,7 +98,7 @@ public struct AnthropicProvider: LLMProvider {
         }
 
         req.httpBody = try JSONEncoder().encode(
-            RequestBody(model: config.model, max_tokens: 1024, temperature: 0.9,
+            RequestBody(model: config.model, max_tokens: LLMDefaults.maxTokens, temperature: LLMDefaults.temperature,
                         system: system, messages: wire))
 
         let data: Data

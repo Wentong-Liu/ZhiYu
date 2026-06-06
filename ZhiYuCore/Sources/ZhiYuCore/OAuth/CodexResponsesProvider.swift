@@ -10,7 +10,7 @@ public struct CodexResponsesProvider: LLMProvider {
     private let session: URLSession
 
     /// 单次请求的连接/响应超时（秒）。
-    private static let requestTimeout: TimeInterval = 60
+    private static let requestTimeout = LLMDefaults.requestTimeout
     /// SSE 读取循环的整体上限（秒）：超过则判定流卡死并失败，避免无限挂起。
     private static let maxStreamSeconds: TimeInterval = 90
 
