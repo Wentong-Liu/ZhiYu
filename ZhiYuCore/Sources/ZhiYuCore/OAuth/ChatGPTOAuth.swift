@@ -73,6 +73,18 @@ public enum ChatGPTOAuth {
             expiresAt: Date().addingTimeInterval(r.expires_in ?? defaultExpiresIn))
     }
 
+    /// JWT payload 中我们关心的部分：["https://api.openai.com/auth"]["chatgpt_account_id"]。
+    /// 用 Decodable 显式建模，避免 [String:Any] 取值时静默降级为空。
+    private struct JWTPayload: Decodable {
+        struct Auth: Decodable {
+            let chatgpt_account_id: String?
+        }
+        let auth: Auth?
+        private enum CodingKeys: String, CodingKey {
+            case auth = "https://api.openai.com/auth"
+        }
+    }
+
     /// 解 JWT payload，取 ["https://api.openai.com/auth"]["chatgpt_account_id"]。
     public static func accountID(fromJWT jwt: String) -> String? {
         let parts = jwt.split(separator: ".")
@@ -82,10 +94,8 @@ public enum ChatGPTOAuth {
             .replacingOccurrences(of: "_", with: "/")
         while b64.count % 4 != 0 { b64 += "=" }
         guard let data = Data(base64Encoded: b64),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let auth = obj["https://api.openai.com/auth"] as? [String: Any],
-              let acct = auth["chatgpt_account_id"] as? String else { return nil }
-        return acct
+              let payload = try? JSONDecoder().decode(JWTPayload.self, from: data) else { return nil }
+        return payload.auth?.chatgpt_account_id
     }
 
     private static func formPost(body: String) -> URLRequest {

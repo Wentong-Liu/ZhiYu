@@ -23,28 +23,71 @@ public struct CodexResponsesProvider: LLMProvider {
         self.session = session
     }
 
+    /// input[].content 里的一项：文本项（input_text/output_text）或图片项（input_image）。
+    /// 用自定义 Encodable 表达这种多态——编码出的键与旧 [String:Any] 等价：
+    /// 文本项 {type,text}，图片项 {type,image_url}。
+    private enum ContentItem: Encodable {
+        case text(type: String, text: String)
+        case image(url: String)
+
+        private enum CodingKeys: String, CodingKey { case type, text, image_url }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case let .text(type, text):
+                try c.encode(type, forKey: .type)
+                try c.encode(text, forKey: .text)
+            case let .image(url):
+                try c.encode("input_image", forKey: .type)
+                try c.encode(url, forKey: .image_url)
+            }
+        }
+    }
+
+    /// 一条 input 消息：role + content 项数组。
+    private struct InputMessage: Encodable {
+        let role: String
+        let content: [ContentItem]
+    }
+
+    /// text 字段：{"verbosity":"low"}。
+    private struct TextOption: Encodable { let verbosity: String }
+
+    /// Responses 请求体（镜像 OpenAICompatibleProvider.RequestBody 写法，键类型安全）。
+    private struct RequestBody: Encodable {
+        let model: String
+        let store: Bool
+        let stream: Bool
+        let instructions: String
+        let input: [InputMessage]
+        let text: TextOption
+        let include: [String]
+        let tool_choice: String
+        let parallel_tool_calls: Bool
+    }
+
     public func complete(messages: [LLMMessage]) async throws -> String {
         guard !accessToken.isEmpty else { throw ProviderError.missingAPIKey }
         let system = messages.first(where: { $0.role == .system })?.content ?? "You are a helpful assistant."
-        let input: [[String: Any]] = messages.filter { $0.role != .system }.map { message in
+        let input: [InputMessage] = messages.filter { $0.role != .system }.map { message in
             let type = (message.role == .assistant) ? "output_text" : "input_text"
-            var content: [[String: Any]] = [["type": type, "text": message.content]]
+            var content: [ContentItem] = [.text(type: type, text: message.content)]
             for url in message.imageDataURLs {
-                content.append(["type": "input_image", "image_url": url])
+                content.append(.image(url: url))
             }
-            return ["role": message.role.rawValue, "content": content]
+            return InputMessage(role: message.role.rawValue, content: content)
         }
-        let body: [String: Any] = [
-            "model": model,
-            "store": false,
-            "stream": true,
-            "instructions": system,
-            "input": input,
-            "text": ["verbosity": "low"],
-            "include": ["reasoning.encrypted_content"],
-            "tool_choice": "auto",
-            "parallel_tool_calls": true,
-        ]
+        let body = RequestBody(
+            model: model,
+            store: false,
+            stream: true,
+            instructions: system,
+            input: input,
+            text: TextOption(verbosity: "low"),
+            include: ["reasoning.encrypted_content"],
+            tool_choice: "auto",
+            parallel_tool_calls: true)
         guard let url = URL(string: ChatGPTOAuth.responsesEndpoint) else {
             throw ProviderError.invalidResponse
         }
@@ -58,7 +101,10 @@ public struct CodexResponsesProvider: LLMProvider {
         req.setValue("responses=experimental", forHTTPHeaderField: "OpenAI-Beta")
         req.setValue("text/event-stream", forHTTPHeaderField: HTTPConstants.acceptHeader)
         req.setValue(HTTPConstants.applicationJSON, forHTTPHeaderField: HTTPConstants.contentTypeHeader)
-        req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.withoutEscapingSlashes])
+        // 配置 .withoutEscapingSlashes 保留原 JSONSerialization 的输出行为（image_url 里的 dataURL 含 /，不转义）。
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        req.httpBody = try encoder.encode(body)
 
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)
         do {
