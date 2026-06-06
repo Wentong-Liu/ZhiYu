@@ -126,10 +126,20 @@ final class CodexLoginService {
         do {
             let (data, resp) = try await URLSession.shared.data(
                 for: ChatGPTOAuth.refreshRequest(refreshToken: tokens.refreshToken))
-            guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else { return nil }
+            guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else {
+                // 刷新非 2xx：记录状态码与 body 片段助排查（行为不变，照常返回 nil）。
+                let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                let snippet = String((String(data: data, encoding: .utf8) ?? "").prefix(500))
+                NSLog("[ZhiYu][CodexLogin] token 刷新失败 status=%d body 片段=%@", status, snippet)
+                return nil
+            }
             let refreshed = try ChatGPTOAuth.parseTokenResponse(data, fallbackRefresh: tokens.refreshToken)
             KeychainStore.saveChatGPTTokens(refreshed)
             return refreshed
-        } catch { return nil }
+        } catch {
+            // 刷新请求抛错（网络/解码等）：记录 error 助排查（行为不变，照常返回 nil）。
+            NSLog("[ZhiYu][CodexLogin] token 刷新抛错 error=%@", String(describing: error))
+            return nil
+        }
     }
 }

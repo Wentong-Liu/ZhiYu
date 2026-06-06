@@ -54,7 +54,14 @@ public enum ChatGPTOAuth {
             let id_token: String?
             let expires_in: Double?
         }
-        guard let r = try? JSONDecoder().decode(Resp.self, from: data) else {
+        let r: Resp
+        do {
+            r = try JSONDecoder().decode(Resp.self, from: data)
+        } catch {
+            // token 响应（成功状态码下）解码失败：记录 error 与 body 片段助排查（行为不变，照常抛 .invalidResponse）。
+            let snippet = String((String(data: data, encoding: .utf8) ?? "").prefix(500))
+            NSLog("[ZhiYu][ChatGPTOAuth] token 响应 JSON 解码失败 error=%@ body 片段=%@",
+                  String(describing: error), snippet)
             throw ProviderError.invalidResponse
         }
         let accountId = accountID(fromJWT: r.access_token) ?? accountID(fromJWT: r.id_token ?? "") ?? ""

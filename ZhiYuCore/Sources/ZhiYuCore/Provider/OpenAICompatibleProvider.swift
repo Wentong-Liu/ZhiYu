@@ -86,6 +86,9 @@ public struct OpenAICompatibleProvider: LLMProvider {
         try HTTPResponseValidator.throwIfHTTPError(http, body: String(data: data, encoding: .utf8) ?? "")
         guard let parsed = try? JSONDecoder().decode(ResponseBody.self, from: data),
               let content = parsed.choices.first?.message.content else {
+            // 成功状态码下却解不出 choices[].message.content：记录 body 片段助排查（行为不变，照常抛 .invalidResponse）。
+            let snippet = String((String(data: data, encoding: .utf8) ?? "").prefix(500))
+            NSLog("[ZhiYu][OpenAICompatible] HTTP %d 成功但 JSON 解码失败，body 片段=%@", http.statusCode, snippet)
             throw ProviderError.invalidResponse
         }
         return content

@@ -97,6 +97,8 @@ public struct CodexResponsesProvider: LLMProvider {
                 continue
             }
         }
+        // 流自然结束却没收到 response.completed/done/incomplete 终止事件：记录助排查（行为不变，仍返回已累积文本）。
+        NSLog("[ZhiYu][CodexResponses] SSE 流结束但未收到终止事件，返回已累积文本 长度=%d", text.count)
         return text
     }
 }

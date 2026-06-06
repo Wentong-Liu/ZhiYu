@@ -54,7 +54,12 @@ final class NewMessageWatcher {
             kAXLayoutChangedNotification as CFString,
         ]
         for note in notes {
-            AXObserverAddNotification(obs, appEl, note, refcon)
+            let err = AXObserverAddNotification(obs, appEl, note, refcon)
+            if err != .success {
+                // 单个通知订阅失败：记录 note 名与 error code 助排查（行为不变，不硬失败，继续订阅其余）。
+                NSLog("[ZhiYu][NewMessageWatcher] AXObserverAddNotification 失败 note=%@ code=%d",
+                      note as String, err.rawValue)
+            }
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
         observer = obs
