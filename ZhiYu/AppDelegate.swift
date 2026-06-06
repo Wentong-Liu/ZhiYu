@@ -28,7 +28,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         doubleTap.start()
         NewMessageWatcher.shared.start()
-        // 首启请求授权：未授予辅助功能权限时弹一次系统授权提示，引导用户去授权。
-        if !AccessibilityAuthorizer.isTrusted { AccessibilityAuthorizer.promptIfNeeded() }
     }
 }
