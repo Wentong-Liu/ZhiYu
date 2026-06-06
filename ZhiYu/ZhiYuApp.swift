@@ -11,7 +11,6 @@ struct ZhiYuApp: App {
         Window("知语设置", id: "settings") {
             SettingsView()
         }
-        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
     }

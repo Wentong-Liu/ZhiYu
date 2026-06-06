@@ -163,6 +163,23 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// 直接配置底层 NSWindow 实现深色透明标题栏（内容延伸到顶、红绿灯浮于深色之上）。
+/// 用 NSViewRepresentable 而非 .windowStyle(.hiddenTitleBar)——后者会把菜单栏代理(.accessory)的 App 提升到 Dock，造成回归。
+private struct WindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.styleMask.insert(.fullSizeContentView)
+            window.isMovableByWindowBackground = true
+        }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
 struct SettingsView: View {
     @StateObject private var vm = SettingsModel()
     @State private var selectedTab: SettingsTab = .provider
@@ -189,6 +206,7 @@ struct SettingsView: View {
         }
         .frame(width: 720, height: 600)
         .background(Color(red: 0.10, green: 0.10, blue: 0.11).ignoresSafeArea())
+        .background(WindowConfigurator())
         .environment(\.colorScheme, .dark)
         .onAppear { vm.refreshPermissions() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
