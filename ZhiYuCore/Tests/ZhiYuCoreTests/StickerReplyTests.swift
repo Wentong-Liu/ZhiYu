@@ -26,11 +26,11 @@ import Testing
         let cache = CandidateCache()
         let gen = ReplyGenerator(provider: provider, cache: cache, candidateCount: 2, modelTag: "t")
         let ctx = ChatContext(contactName: "x", messages: [ChatMessage(speaker: .other, text: "你看这个")], draft: "")
-        let r = try await gen.generate(context: ctx, style: .friendly)
+        let r = try await gen.generate(context: ctx, style: .natural)
         #expect(r.candidates == ["哈哈", "笑死"])
         #expect(r.stickerKeyword == "笑死")
         // 缓存命中也应保留关键词
-        let r2 = try await gen.generate(context: ctx, style: .friendly)
+        let r2 = try await gen.generate(context: ctx, style: .natural)
         #expect(r2.stickerKeyword == "笑死")
     }
 }

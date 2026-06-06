@@ -17,10 +17,6 @@ public struct ReplyStyle: Equatable, Sendable {
     public static let humorous = ReplyStyle(name: "幽默", instruction: "带点梗和幽默，轻松但不尬不油。")
     public static let formal   = ReplyStyle(name: "正经", instruction: "同事或办正事的场景，得体一点，但仍然简短自然、不端着、不客服腔。")
 
-    /// 旧静态名的别名，保持外部调用点（含测试）兼容；都回落到「自然」。
-    public static let friendly = ReplyStyle.natural
-    public static let warm     = ReplyStyle.natural
-
     /// 展示与存取用的预设顺序；第一个是默认。
     public static let presets: [ReplyStyle] = [.natural, .concise, .buddy, .humorous, .formal]
 
