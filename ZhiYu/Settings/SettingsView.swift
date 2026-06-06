@@ -147,8 +147,8 @@ private struct MonoButton: ButtonStyle {
 
 /// 设置窗口的两个选项卡。
 private enum SettingsTab: String, CaseIterable, Identifiable {
-    case provider = "模型 / Provider"
     case general = "通用设置"
+    case provider = "模型 / Provider"
     var id: String { rawValue }
     /// 侧边栏/右侧大标题用的短名称。
     var shortTitle: String {
