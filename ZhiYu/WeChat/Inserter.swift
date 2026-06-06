@@ -44,14 +44,18 @@ enum Inserter {
     }
 
     /// 把多条气泡逐条单独发出（每条之间留间隔，给微信处理时间）。
-    static func sendSequential(_ parts: [String]) {
-        sendNext(parts, 0)
+    static func sendSequential(_ parts: [String], targetContact: String?) {
+        sendNext(parts, 0, targetContact)
     }
 
-    private static func sendNext(_ parts: [String], _ i: Int) {
+    private static func sendNext(_ parts: [String], _ i: Int, _ targetContact: String?) {
         guard i < parts.count else { return }
         let text = parts[i]
-        guard !text.isEmpty else { sendNext(parts, i + 1); return }
+        guard !text.isEmpty else { sendNext(parts, i + 1, targetContact); return }
+        // 每条发送前校验会话身份：会话已切换则停止，避免把后续气泡发到别的会话。默认放行(isCurrentContact 内部处理)。
+        guard WeChatAXProbe.isCurrentContact(targetContact) else {
+            NSSound.beep(); NSLog("[ZhiYu] sendSequential 第 %d/%d 条前检测到会话已切换，停止发送", i + 1, parts.count); return
+        }
         fillAndSend(text) { ok in
             // 这一条没发出（false）：若继续 setText 下一条会覆盖 composer 导致漏发/乱序，故停止剩余逐条发送。
             guard ok else {
@@ -61,7 +65,7 @@ enum Inserter {
             }
             // 上一条发出后留 0.4s 再发下一条（叠加 fillAndSend 内部时序，约 0.8s/条）。
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                sendNext(parts, i + 1)
+                sendNext(parts, i + 1, targetContact)
             }
         }
     }

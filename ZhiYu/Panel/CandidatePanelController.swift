@@ -257,15 +257,13 @@ final class CandidatePanelController: NSObject {
     /// 落地动作前校验微信「当前打开会话」是否仍是本次面板的目标会话。
     /// 务必默认放行、绝不误拦：无目标/读不到/为空一律放行（return true），只在确读到不同会话才返回 false。
     private func guardSameConversation() -> Bool {
-        guard let target = presentTargetContact else { return true }
-        guard let cur = WeChatAXProbe.currentContactName()?.trimmingCharacters(in: .whitespacesAndNewlines), !cur.isEmpty else { return true }
-        return cur == target.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WeChatAXProbe.isCurrentContact(presentTargetContact)
     }
 
     private func showPanel(anchorAXFrame axFrame: CGRect) {
         self.anchorAXFrame = axFrame
         model.onFill = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.fill(t) } else { NSSound.beep() }; self.dismiss() }
-        model.onSend = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.sendSequential(BubbleSplitter.split(t)) } else { NSSound.beep() }; self.dismiss() }
+        model.onSend = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.sendSequential(BubbleSplitter.split(t), targetContact: self.presentTargetContact) } else { NSSound.beep() }; self.dismiss() }
         model.onSendSticker = { [weak self] kw in guard let self else { return }; self.dismiss(); if self.guardSameConversation() { StickerSender.send(keyword: kw) } else { NSSound.beep() } }
         model.onDismiss = { [weak self] in self?.dismiss() }
         // 拖动松手：把面板当前原点相对实时自动锚点的差值记为手动偏移并持久化（跟随微信窗口）。

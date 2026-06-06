@@ -237,6 +237,13 @@ enum WeChatAXProbe {
         return locateContactTitle(in: panel)
     }
 
+    /// 会话身份守卫：当前微信会话是否仍是 target。**默认放行**——target 为 nil / 读不到当前会话 / 当前为空，一律 true（绝不误拦正常发送）；仅在确读到非空且与 target 不同时返回 false。
+    static func isCurrentContact(_ target: String?) -> Bool {
+        guard let target else { return true }
+        guard let cur = currentContactName()?.trimmingCharacters(in: .whitespacesAndNewlines), !cur.isEmpty else { return true }
+        return cur == target.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// 定位右侧会话面板：
     /// 1) 在窗口浅层子节点里找 role==AXSplitGroup 的主 split group。
     /// 2) 在主 split group 的【直接子节点】里找 role==AXSplitGroup 的那个作为右侧面板。
