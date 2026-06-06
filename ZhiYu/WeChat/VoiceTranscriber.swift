@@ -84,7 +84,7 @@ enum VoiceTranscriber {
     // MARK: - 单条触发
 
     private static func triggerTranscribe(_ bubble: AXUIElement, panel: AXUIElement, appEl: AXUIElement) async -> Bool {
-        guard WeChatAXProbe.actions(bubble).contains("AXShowMenu") else { return false }
+        guard WeChatAXProbe.actions(bubble).contains(AXAction.showMenu) else { return false }
         var target: AXUIElement?
         var foundMenu: AXUIElement?
         let tStart = ProcessInfo.processInfo.systemUptime
@@ -93,7 +93,7 @@ enum VoiceTranscriber {
             if Task.isCancelled { return false }
             AXUIElementSetMessagingTimeout(bubble, Float(axMessagingTimeout))
             let tShow = ProcessInfo.processInfo.systemUptime
-            AXUIElementPerformAction(bubble, "AXShowMenu" as CFString)
+            AXUIElementPerformAction(bubble, AXAction.showMenu as CFString)
             let showMs = (ProcessInfo.processInfo.systemUptime - tShow) * 1000
             // 动作刚返回，先廉价查一下菜单是否已出现（兼顾"接受且极快渲染"的情况，避免误重试）。
             if let menu = dfsMenu(panel), let it = transcribeItem(in: menu) { target = it; foundMenu = menu; break }
@@ -114,12 +114,12 @@ enum VoiceTranscriber {
         if target == nil, let menu = dfsMenu(appEl), let it = transcribeItem(in: menu) { target = it; foundMenu = menu }
         guard let target else {
             if let stray = dfsMenu(panel) {
-                AXUIElementPerformAction(stray, "AXCancel" as CFString)
+                AXUIElementPerformAction(stray, AXAction.cancel as CFString)
                 await waitMenuClosed(stray)
             }
             return false
         }
-        AXUIElementPerformAction(target, "AXPress" as CFString)
+        AXUIElementPerformAction(target, AXAction.press as CFString)
         if let m = foundMenu { await waitMenuClosed(m) }
         return true
     }
@@ -137,18 +137,18 @@ enum VoiceTranscriber {
         let start = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - start < menuClosePollWindow {
             if Task.isCancelled { return }
-            if WeChatAXProbe.role(menu) != "AXMenu" { return }  // 元素已失效/不再是菜单 = 已关
+            if WeChatAXProbe.role(menu) != AXRole.menu { return }  // 元素已失效/不再是菜单 = 已关
             try? await Task.sleep(nanoseconds: menuCloseStepNanos)
         }
     }
 
     /// 菜单里标题 trim 后等于「转文字」且 enabled 的菜单项。
     private static func transcribeItem(in menu: AXUIElement) -> AXUIElement? {
-        for it in WeChatAXProbe.children(menu) where WeChatAXProbe.role(it) == "AXMenuItem" {
-            let title = (WeChatAXProbe.copyString(it, "AXTitle") ?? "")
+        for it in WeChatAXProbe.children(menu) where WeChatAXProbe.role(it) == AXRole.menuItem {
+            let title = (WeChatAXProbe.copyString(it, AXAttr.title) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let enabled = WeChatAXProbe.copyBool(it, "AXEnabled") ?? true
-            if title == "转文字", enabled { return it }
+            let enabled = WeChatAXProbe.copyBool(it, AXAttr.enabled) ?? true
+            if title == WeChatMarkers.transcribeMenuItemTitle, enabled { return it }
         }
         return nil
     }
@@ -178,7 +178,7 @@ enum VoiceTranscriber {
         func walk(_ el: AXUIElement, _ d: Int) {
             if result != nil || n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return }
             n += 1
-            if WeChatAXProbe.role(el) == "AXMenu" { result = el; return }
+            if WeChatAXProbe.role(el) == AXRole.menu { result = el; return }
             for c in WeChatAXProbe.children(el) { walk(c, d + 1); if result != nil { return } }
         }
         walk(root, 0)

@@ -11,7 +11,7 @@ enum InserterProbe {
     /// 不再取 collect() 抓到的第一个可编辑元素（很可能是左上角搜索框）。
     static func setText(_ text: String) -> Bool {
         guard let field = locateComposer() else { return false }
-        return AXUIElementSetAttributeValue(field, "AXValue" as CFString, text as CFString) == .success
+        return AXUIElementSetAttributeValue(field, AXAttr.value as CFString, text as CFString) == .success
     }
 
     /// 定位微信消息输入框 composer（读/写共用同一规则）。
@@ -30,14 +30,14 @@ enum InserterProbe {
     /// 读取当前 composer 的 AXValue，用于写入后校验。
     static func composerValue() -> String? {
         guard let field = locateComposer() else { return nil }
-        return WeChatAXProbe.copyString(field, "AXValue")
+        return WeChatAXProbe.copyString(field, AXAttr.value)
     }
 
     /// 读取当前 composer 的 AXFocused，用于回车前确认键盘焦点是否真正落在输入框。
     /// 部分实现可能不暴露该属性（返回 nil），调用方据此做容错（nil 不等于 false，需结合前台校验）。
     static func composerFocused() -> Bool? {
         guard let field = locateComposer() else { return nil }
-        return WeChatAXProbe.copyBool(field, "AXFocused")
+        return WeChatAXProbe.copyBool(field, AXAttr.focused)
     }
 
     /// 回车前的前台/焦点二次校验：activate() 是异步 fire-and-forget，AXValue 写入成功不代表
@@ -69,7 +69,7 @@ enum InserterProbe {
             return false
         }
         // AXFocused 设置可能返回 kAXErrorAttributeUnsupported 等错误，容错处理。
-        _ = AXUIElementSetAttributeValue(composer, "AXFocused" as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(composer, AXAttr.focused as CFString, kCFBooleanTrue)
         WeChatAXProbe.findWeChatApp()?.activate()
         return true
     }

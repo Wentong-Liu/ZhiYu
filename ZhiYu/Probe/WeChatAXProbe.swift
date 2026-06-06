@@ -7,18 +7,18 @@ enum WeChatAXProbe {
     // 微信 Mac 可能的 bundle id（不同版本/渠道可能不同）
     static let bundleIDs = ["com.tencent.xinWeChat", "com.tencent.WeChat"]
 
-    // AX role 字面量（避免常量类型歧义）
-    private static let roleStaticText = "AXStaticText"
-    private static let roleTextArea = "AXTextArea"
-    private static let roleTextField = "AXTextField"
-    private static let roleScrollArea = "AXScrollArea"
-    private static let roleSplitGroup = "AXSplitGroup"
-    private static let roleTable = "AXTable"
-    private static let roleRow = "AXRow"
-    private static let roleTableRow = "AXTableRow"
-    private static let roleImage = "AXImage"
-    private static let roleColumn = "AXColumn"
-    private static let roleScrollBar = "AXScrollBar"
+    // AX role 字面量收敛到共享 AXRole（避免常量类型歧义，跨文件复用）。
+    private static let roleStaticText = AXRole.staticText
+    private static let roleTextArea = AXRole.textArea
+    private static let roleTextField = AXRole.textField
+    private static let roleScrollArea = AXRole.scrollArea
+    private static let roleSplitGroup = AXRole.splitGroup
+    private static let roleTable = AXRole.table
+    private static let roleRow = AXRole.row
+    private static let roleTableRow = AXRole.tableRow
+    private static let roleImage = AXRole.image
+    private static let roleColumn = AXRole.column
+    private static let roleScrollBar = AXRole.scrollBar
 
     /// 快速读取只取最后 N 行消息。
     private static let maxMessages = 30
@@ -116,8 +116,8 @@ enum WeChatAXProbe {
     /// 这是两个便宜的 set 调用，不做整树遍历。保留以兼容不同版本；失败容错，不 crash。
     @discardableResult
     static func wakeAccessibility(_ appElement: AXUIElement) -> [String] {
-        let r1 = AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        let r2 = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        let r1 = AXUIElementSetAttributeValue(appElement, AXAttr.manualAccessibility as CFString, kCFBooleanTrue)
+        let r2 = AXUIElementSetAttributeValue(appElement, AXAttr.enhancedUserInterface as CFString, kCFBooleanTrue)
         return [
             "AXManualAccessibility set -> \(r1.rawValue)",
             "AXEnhancedUserInterface set -> \(r2.rawValue)",
@@ -154,7 +154,7 @@ enum WeChatAXProbe {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - t0) * 1000)
             return .success(ProbeResult(
                 elapsedMs: elapsed,
-                contactName: copyString(window, "AXTitle") ?? app.localizedName ?? "未知联系人",
+                contactName: copyString(window, AXAttr.title) ?? app.localizedName ?? "未知联系人",
                 messages: [],
                 draft: "",
                 inputFrame: nil,
@@ -166,7 +166,7 @@ enum WeChatAXProbe {
         let messageTable = locateMessageTable(in: panel)
         let composer = locateComposerInPanel(panel)
         let title = locateContactTitle(in: panel)
-            ?? copyString(window, "AXTitle")
+            ?? copyString(window, AXAttr.title)
             ?? app.localizedName
             ?? "未知联系人"
 
@@ -183,8 +183,8 @@ enum WeChatAXProbe {
         var inputFocused = false
         var inputFrame: CGRect? = nil
         if let c = composer {
-            draft = copyString(c, "AXValue") ?? ""
-            inputFocused = copyBool(c, "AXFocused") ?? false
+            draft = copyString(c, AXAttr.value) ?? ""
+            inputFocused = copyBool(c, AXAttr.focused) ?? false
             inputFrame = frame(of: c)
         } else {
             diagnostics.append("未定位到输入框 composer（结构可能已变）")
@@ -320,7 +320,7 @@ enum WeChatAXProbe {
         let r = role(el)
         // 不下钻 ScrollArea/Table（消息列表、输入区滚动），标题是面板直挂的 AXStaticText。
         if r == roleScrollArea || r == roleTable { return }
-        if r == roleStaticText, let s = copyString(el, "AXValue"),
+        if r == roleStaticText, let s = copyString(el, AXAttr.value),
            !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             out.append((s, frame(of: el)?.minY ?? .greatestFiniteMagnitude))
         }
@@ -521,7 +521,7 @@ enum WeChatAXProbe {
     /// 依次尝试多个文本属性，返回首个非空。
     /// 微信消息气泡文字在 AXTitle/AXDescription 而非 AXValue（输入框草稿才在 AXValue）。
     static func bestText(_ el: AXUIElement) -> String? {
-        for attr in ["AXValue", "AXTitle", "AXDescription"] {
+        for attr in [AXAttr.value, AXAttr.title, AXAttr.description] {
             if let s = copyString(el, attr),
                !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return s
@@ -538,12 +538,12 @@ enum WeChatAXProbe {
 
     static func children(_ el: AXUIElement) -> [AXUIElement] {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, "AXChildren" as CFString, &value) == .success,
+        guard AXUIElementCopyAttributeValue(el, AXAttr.children as CFString, &value) == .success,
               let arr = value as? [AXUIElement] else { return [] }
         return arr
     }
 
-    static func role(_ el: AXUIElement) -> String { copyString(el, "AXRole") ?? "" }
+    static func role(_ el: AXUIElement) -> String { copyString(el, AXAttr.role) ?? "" }
 
     /// 读取元素支持的 action 名列表（AXShowMenu/AXPress 等）。供 VoiceTranscriber/StickerSender 复用。
     static func actions(_ el: AXUIElement) -> [String] {
@@ -554,7 +554,7 @@ enum WeChatAXProbe {
 
     /// 拿到 app 的前台窗口：AXFocusedWindow 优先，回退 AXMainWindow。各站点统一调用此封装。
     static func focusedOrMainWindow(of app: AXUIElement) -> AXUIElement? {
-        copyElement(app, "AXFocusedWindow") ?? copyElement(app, "AXMainWindow")
+        copyElement(app, AXAttr.focusedWindow) ?? copyElement(app, AXAttr.mainWindow)
     }
 
     /// 抽取表的直接行子节点（role==AXRow 或 AXTableRow）。cheapSignature 与 readMessages 复用。
@@ -570,9 +570,9 @@ enum WeChatAXProbe {
         var sizeValue: CFTypeRef?
         // 仅校验 .success 不够：某些元素/微信版本可能返回 nil 或非 AXValue 包装类型，
         // force-cast 会运行期崩溃。先校验 CFTypeID == AXValueGetTypeID() 再转换。
-        guard AXUIElementCopyAttributeValue(el, "AXPosition" as CFString, &posValue) == .success,
+        guard AXUIElementCopyAttributeValue(el, AXAttr.position as CFString, &posValue) == .success,
               let pv = posValue, CFGetTypeID(pv) == AXValueGetTypeID(),
-              AXUIElementCopyAttributeValue(el, "AXSize" as CFString, &sizeValue) == .success,
+              AXUIElementCopyAttributeValue(el, AXAttr.size as CFString, &sizeValue) == .success,
               let sv = sizeValue, CFGetTypeID(sv) == AXValueGetTypeID()
         else { return nil }
         let posV = pv as! AXValue   // 已校验类型，转换安全

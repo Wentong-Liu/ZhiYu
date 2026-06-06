@@ -19,4 +19,13 @@ public enum WeChatMarkers {
     public static let imagePlaceholder = "[图片]"
     /// 表情占位。
     public static let stickerPlaceholder = "[表情]"
+
+    // MARK: - 微信原生 UI 控件文案（AX 命中用，需逐字匹配微信本地化）
+
+    /// 语音气泡右键菜单里「转文字」菜单项的标题（VoiceTranscriber 用）。
+    public static let transcribeMenuItemTitle = "转文字"
+    /// 主窗口右侧「表情」按钮的标题（StickerSender 用）。
+    public static let emojiButtonTitle = "表情"
+    /// 表情面板搜索框的占位文案「搜索表情」（StickerSender 用）。
+    public static let stickerSearchPlaceholder = "搜索表情"
 }
