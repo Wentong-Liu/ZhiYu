@@ -18,11 +18,19 @@ public enum CandidateParser {
     /// 匹配行首"表情: "前缀的共享子模式（半/全角冒号）：兜底过滤与 parseSticker 共用。
     private static let stickerPrefix = "^\\s*表情\\s*[:：]"
 
+    /// parseSticker 的捕获正则（多行模式 + 捕获组取关键词），预编译为静态常量避免每次调用重建。
+    private static let stickerKeywordRegex = try? NSRegularExpression(
+        pattern: "(?m)" + stickerPrefix + "\\s*(.+)$"
+    )
+
+    /// 否定词集合：命中即视为「不建议表情」，parseSticker 返回 nil（比较前先 lowercased）。
+    private static let negativeStickerKeywords: Set<String> = ["无", "没有", "none", "n/a", "不需要"]
+
     /// 解析可选的"表情关键词"：匹配独立的一行 `表情: 关键词` / `表情：关键词`（半/全角冒号）。
     /// 去掉引号/方括号/书名号；否定词「无 / 没有 / none / n/a / 不需要」视为不建议表情，返回 nil。
     public static func parseSticker(_ raw: String) -> String? {
         // 多行模式下复用 stickerPrefix，并用捕获组直接取关键词。
-        guard let re = try? NSRegularExpression(pattern: "(?m)" + stickerPrefix + "\\s*(.+)$"),
+        guard let re = stickerKeywordRegex,
               let m = re.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
               let keywordRange = Range(m.range(at: 1), in: raw) else {
             return nil
@@ -30,19 +38,62 @@ public enum CandidateParser {
         var s = String(raw[keywordRange])
         s = s.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"'「」『』【】[]()（）"))
         let lowered = s.lowercased()
-        if s.isEmpty || ["无", "没有", "none", "n/a", "不需要"].contains(lowered) { return nil }
+        if s.isEmpty || negativeStickerKeywords.contains(lowered) { return nil }
         return s
     }
 
-    /// 截取第一个 [ ... ] 区间按 JSON 字符串数组解析。
+    /// 解析 JSON 字符串数组。
+    /// 先对整串直接试解码（处理候选文本含 `]`「[图片]」等会让粗暴切片切错的情况），
+    /// 失败再从第一个 `[` 起做中括号配平（忽略字符串字面量内部的括号）取到匹配收尾的 `]` 再解码。
     private static func parseJSONArray(_ raw: String) -> [String]? {
-        guard let start = raw.firstIndex(of: "["), let end = raw.lastIndex(of: "]"), start < end else {
+        // 1) 整串直接试：合法输入（无包裹文本）一步到位，且不会被内容里的 ] 误切。
+        if let arr = decodeStringArray(raw) { return arr }
+        // 2) 配平提取最外层 [...]，对字符串字面量内的括号免疫。
+        guard let slice = balancedArraySlice(raw), let arr = decodeStringArray(slice) else {
+            NSLog("[ZhiYu][CandidateParser] parseJSONArray decode failed, falling back to line parsing")
             return nil
         }
-        let slice = String(raw[start...end])
-        guard let data = slice.data(using: .utf8),
-              let arr = try? JSONDecoder().decode([String].self, from: data) else { return nil }
         return arr
+    }
+
+    /// 尝试把一段文本按 `[String]` JSON 解码，失败返回 nil。
+    private static func decodeStringArray(_ s: String) -> [String]? {
+        guard let data = s.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([String].self, from: data)
+    }
+
+    /// 从第一个 `[` 起做中括号配平，返回包含匹配收尾 `]` 的子串；忽略 JSON 字符串字面量内部的括号与转义。
+    private static func balancedArraySlice(_ raw: String) -> String? {
+        guard let start = raw.firstIndex(of: "[") else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var idx = start
+        while idx < raw.endIndex {
+            let ch = raw[idx]
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    inString = false
+                }
+            } else {
+                switch ch {
+                case "\"": inString = true
+                case "[": depth += 1
+                case "]":
+                    depth -= 1
+                    if depth == 0 {
+                        return String(raw[start...idx])
+                    }
+                default: break
+                }
+            }
+            idx = raw.index(after: idx)
+        }
+        return nil
     }
 
     /// 兜底：按行拆，去掉前导编号/项目符号/引号。
