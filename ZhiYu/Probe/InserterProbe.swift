@@ -48,9 +48,9 @@ enum InserterProbe {
     /// 二者都拿不到肯定信号时返回 false，调用方应放弃回车以免事件进错窗口导致整条不发送。
     static func isWeChatFrontFocused() -> Bool {
         let appActive = WeChatAXProbe.findWeChatApp()?.isActive ?? false
+        // 复用统一身份判定（bundle id + 本地化名兜底），与 WeChatAXProbe.isWeChat 同口径。
         let frontIsWeChat = NSWorkspace.shared.frontmostApplication
-            .flatMap { $0.bundleIdentifier }
-            .map { WeChatAXProbe.bundleIDs.contains($0) } ?? false
+            .map(WeChatAXProbe.isWeChat) ?? false
         let focused = composerFocused() ?? false
         return appActive || frontIsWeChat || focused
     }

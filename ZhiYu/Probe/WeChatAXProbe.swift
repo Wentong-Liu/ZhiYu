@@ -97,10 +97,15 @@ enum WeChatAXProbe {
         return app.localizedName == "WeChat" || app.localizedName == "微信"
     }
 
+    /// 仅按 bundle id 命中 bundleIDs（不含本地化名兜底）。供 findWeChatApp 的「偏向标准包」优先级语义复用。
+    private static func isWeChatByID(_ app: NSRunningApplication) -> Bool {
+        app.bundleIdentifier.map(bundleIDs.contains) ?? false
+    }
+
     static func findWeChatApp() -> NSRunningApplication? {
         let apps = NSWorkspace.shared.runningApplications
         // byID 优先：bundle id 命中者优先返回（多实例时偏向标准包）。
-        if let byID = apps.first(where: { ($0.bundleIdentifier).map(bundleIDs.contains) ?? false }) {
+        if let byID = apps.first(where: isWeChatByID) {
             return byID
         }
         // 名字匹配复用统一判定 isWeChat（与 CandidatePanelController.isWeChatFrontmost 同口径）。

@@ -26,12 +26,9 @@ final class NewMessageWatcher {
                 forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
             ) { note in
                 guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-                let bundleID = app.bundleIdentifier
-                let name = app.localizedName
                 MainActor.assumeIsolated {
-                    let isWeChat = WeChatAXProbe.bundleIDs.contains(bundleID ?? "")
-                        || name == "WeChat" || name == "微信"
-                    guard isWeChat else { return }
+                    // 复用统一身份判定（bundle id + 本地化名兜底），与 WeChatAXProbe.findWeChatApp 同口径。
+                    guard WeChatAXProbe.isWeChat(app) else { return }
                     NewMessageWatcher.shared.registerObserverIfNeeded()   // 跟上当前微信 pid（含微信后启动/重启）
                     CandidatePanelController.shared.autoOnActivate()
                 }
