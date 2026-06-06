@@ -321,16 +321,44 @@ struct SettingsView: View {
 
     // MARK: 模型来源 —— 纵向列表 + 单选
 
+    /// 纯 API Key 型的五家（OpenAI 因含 ChatGPT 登录分支单列，见 openAIRow）。
+    /// title 取 family.defaultKind.displayName（与 ProviderConfig.name 同源），subtitle/placeholder 逐字保持原样。
+    private struct KeyProvider: Identifiable {
+        let family: ProviderFamily
+        let subtitle: String
+        let placeholder: String
+        var id: ProviderFamily { family }
+        var title: String { family.defaultKind.displayName }
+    }
+
+    private static let keyProviders: [KeyProvider] = [
+        KeyProvider(family: .deepSeek,  subtitle: "API Key",        placeholder: "DeepSeek API Key"),
+        KeyProvider(family: .anthropic, subtitle: "Claude · API Key", placeholder: "Anthropic API Key"),
+        KeyProvider(family: .glm,       subtitle: "API Key",        placeholder: "智谱GLM API Key"),
+        KeyProvider(family: .kimi,      subtitle: "API Key",        placeholder: "Kimi API Key"),
+        KeyProvider(family: .minimax,   subtitle: "API Key",        placeholder: "MiniMax API Key"),
+    ]
+
     private var providerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("模型来源")
             VStack(spacing: 8) {
                 openAIRow
-                deepSeekRow
-                anthropicRow
-                glmRow
-                kimiRow
-                minimaxRow
+                ForEach(Self.keyProviders) { p in
+                    keyRow(family: p.family, title: p.title, subtitle: p.subtitle, placeholder: p.placeholder)
+                }
+            }
+        }
+    }
+
+    /// 纯「API Key」型 provider 行：单选卡 + SecureField($vm.apiKey) + 保存。与原 deepSeekRow 等五个一字不差。
+    private func keyRow(family: ProviderFamily, title: String, subtitle: String, placeholder: String) -> some View {
+        providerCard(selected: vm.family == family, title: title,
+                     subtitle: subtitle,
+                     onSelect: { vm.family = family }) {
+            HStack(spacing: 10) {
+                SecureField(placeholder, text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
             }
         }
     }
@@ -358,61 +386,6 @@ struct SettingsView: View {
                     SecureField("OpenAI API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
                     Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
                 }
-            }
-        }
-    }
-
-    private var deepSeekRow: some View {
-        providerCard(selected: vm.family == .deepSeek, title: ProviderFamily.deepSeek.defaultKind.displayName,
-                     subtitle: "API Key",
-                     onSelect: { vm.family = .deepSeek }) {
-            HStack(spacing: 10) {
-                SecureField("DeepSeek API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
-                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
-            }
-        }
-    }
-
-    private var anthropicRow: some View {
-        providerCard(selected: vm.family == .anthropic, title: ProviderFamily.anthropic.defaultKind.displayName,
-                     subtitle: "Claude · API Key",
-                     onSelect: { vm.family = .anthropic }) {
-            HStack(spacing: 10) {
-                SecureField("Anthropic API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
-                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
-            }
-        }
-    }
-
-    private var glmRow: some View {
-        providerCard(selected: vm.family == .glm, title: ProviderFamily.glm.defaultKind.displayName,
-                     subtitle: "API Key",
-                     onSelect: { vm.family = .glm }) {
-            HStack(spacing: 10) {
-                SecureField("智谱GLM API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
-                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
-            }
-        }
-    }
-
-    private var kimiRow: some View {
-        providerCard(selected: vm.family == .kimi, title: ProviderFamily.kimi.defaultKind.displayName,
-                     subtitle: "API Key",
-                     onSelect: { vm.family = .kimi }) {
-            HStack(spacing: 10) {
-                SecureField("Kimi API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
-                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
-            }
-        }
-    }
-
-    private var minimaxRow: some View {
-        providerCard(selected: vm.family == .minimax, title: ProviderFamily.minimax.defaultKind.displayName,
-                     subtitle: "API Key",
-                     onSelect: { vm.family = .minimax }) {
-            HStack(spacing: 10) {
-                SecureField("MiniMax API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
-                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
             }
         }
     }
