@@ -2,11 +2,14 @@ import SwiftUI
 import Combine
 import ZhiYuCore
 
-/// 设置里把 OpenAI(API Key) 与 ChatGPT 登录归为同一"家族"(OpenAI)，DeepSeek / Anthropic 各自单独一家族。
+/// 设置里把 OpenAI(API Key) 与 ChatGPT 登录归为同一"家族"(OpenAI)，DeepSeek / Anthropic / 智谱GLM / Kimi / MiniMax 各自单独一家族。
 enum ProviderFamily: String, CaseIterable, Identifiable {
     case openAI = "OpenAI"
     case deepSeek = "DeepSeek"
     case anthropic = "Anthropic"
+    case glm = "智谱GLM"
+    case kimi = "Kimi"
+    case minimax = "MiniMax"
     var id: String { rawValue }
 }
 
@@ -30,6 +33,9 @@ final class SettingsModel: ObservableObject {
         switch family {
         case .deepSeek: return .deepSeek
         case .anthropic: return .anthropic
+        case .glm: return .glm
+        case .kimi: return .kimi
+        case .minimax: return .minimax
         case .openAI: return openAIUsesChatGPT ? .chatGPT : .openAI
         }
     }
@@ -39,6 +45,9 @@ final class SettingsModel: ObservableObject {
         switch k {
         case .deepSeek: family = .deepSeek
         case .anthropic: family = .anthropic
+        case .glm: family = .glm
+        case .kimi: family = .kimi
+        case .minimax: family = .minimax
         default: family = .openAI
         }
         openAIUsesChatGPT = (k == .chatGPT)
@@ -51,6 +60,9 @@ final class SettingsModel: ObservableObject {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
         case .anthropic: apiKey = KeychainStore.anthropicKey()
+        case .glm: apiKey = KeychainStore.glmKey()
+        case .kimi: apiKey = KeychainStore.kimiKey()
+        case .minimax: apiKey = KeychainStore.minimaxKey()
         case .chatGPT: apiKey = ""
         }
         customPrompt = AppConfig.shared.customPrompt
@@ -65,6 +77,9 @@ final class SettingsModel: ObservableObject {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
         case .anthropic: apiKey = KeychainStore.anthropicKey()
+        case .glm: apiKey = KeychainStore.glmKey()
+        case .kimi: apiKey = KeychainStore.kimiKey()
+        case .minimax: apiKey = KeychainStore.minimaxKey()
         case .chatGPT: apiKey = ""
         }
         loggedIn = KeychainStore.loadChatGPTTokens() != nil
@@ -79,6 +94,12 @@ final class SettingsModel: ObservableObject {
             status = KeychainStore.setDeepSeekKey(k) ? "已保存 DeepSeek Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
         case .anthropic:
             status = KeychainStore.setAnthropicKey(k) ? "已保存 Anthropic Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
+        case .glm:
+            status = KeychainStore.setGLMKey(k) ? "已保存 智谱GLM Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
+        case .kimi:
+            status = KeychainStore.setKimiKey(k) ? "已保存 Kimi Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
+        case .minimax:
+            status = KeychainStore.setMinimaxKey(k) ? "已保存 MiniMax Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
         case .chatGPT: break
         }
     }
@@ -158,6 +179,9 @@ struct SettingsView: View {
                 openAIRow
                 deepSeekRow
                 anthropicRow
+                glmRow
+                kimiRow
+                minimaxRow
             }
         }
     }
@@ -206,6 +230,39 @@ struct SettingsView: View {
                      onSelect: { vm.family = .anthropic }) {
             HStack(spacing: 10) {
                 SecureField("Anthropic API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
+            }
+        }
+    }
+
+    private var glmRow: some View {
+        providerCard(selected: vm.family == .glm, title: "智谱GLM",
+                     subtitle: "API Key",
+                     onSelect: { vm.family = .glm }) {
+            HStack(spacing: 10) {
+                SecureField("智谱GLM API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
+            }
+        }
+    }
+
+    private var kimiRow: some View {
+        providerCard(selected: vm.family == .kimi, title: "Kimi",
+                     subtitle: "API Key",
+                     onSelect: { vm.family = .kimi }) {
+            HStack(spacing: 10) {
+                SecureField("Kimi API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
+            }
+        }
+    }
+
+    private var minimaxRow: some View {
+        providerCard(selected: vm.family == .minimax, title: "MiniMax",
+                     subtitle: "API Key",
+                     onSelect: { vm.family = .minimax }) {
+            HStack(spacing: 10) {
+                SecureField("MiniMax API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
                 Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
             }
         }

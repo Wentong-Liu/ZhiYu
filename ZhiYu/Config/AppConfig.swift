@@ -5,6 +5,9 @@ enum ProviderKind: String, CaseIterable, Identifiable {
     case openAI = "OpenAI"
     case deepSeek = "DeepSeek"
     case anthropic = "Anthropic"
+    case glm = "智谱GLM"
+    case kimi = "Kimi"
+    case minimax = "MiniMax"
     case chatGPT = "ChatGPT 登录"
     var id: String { rawValue }
 
@@ -20,6 +23,15 @@ enum ProviderKind: String, CaseIterable, Identifiable {
             return [("claude-sonnet-4-6", "Claude Sonnet 4.6"),
                     ("claude-opus-4-8", "Claude Opus 4.8"),
                     ("claude-haiku-4-5-20251001", "Claude Haiku 4.5")]
+        case .glm:
+            return [("glm-4-flash", "GLM-4-Flash"), ("glm-4-plus", "GLM-4-Plus"),
+                    ("glm-4-air", "GLM-4-Air"), ("glm-4.6", "GLM-4.6")]
+        case .kimi:
+            return [("moonshot-v1-8k", "Moonshot v1 8K"), ("moonshot-v1-32k", "Moonshot v1 32K"),
+                    ("moonshot-v1-128k", "Moonshot v1 128K"), ("kimi-latest", "Kimi Latest")]
+        case .minimax:
+            return [("MiniMax-M2", "MiniMax-M2"), ("MiniMax-M2.5", "MiniMax-M2.5"),
+                    ("MiniMax-M3", "MiniMax-M3")]
         case .chatGPT:
             return [("gpt-5.5", "GPT-5.5"), ("gpt-5.5-pro", "GPT-5.5 Pro"),
                     ("gpt-5.4", "GPT-5.4"), ("gpt-5.4-pro", "GPT-5.4 Pro"),
@@ -30,11 +42,11 @@ enum ProviderKind: String, CaseIterable, Identifiable {
 
     /// 该 Provider 在本 App 内是否会把图片发给模型（即能否识别图片/表情包）。
     /// Anthropic、ChatGPT、OpenAI（gpt-4o 系，走 OpenAICompatibleProvider 发图）会发送图片；
-    /// DeepSeek 是纯文本模型，只发文本。
+    /// DeepSeek / 智谱GLM / Kimi / MiniMax 默认模型是纯文本，只发文本。
     var supportsMultimodal: Bool {
         switch self {
         case .anthropic, .chatGPT, .openAI: return true
-        case .deepSeek: return false
+        case .deepSeek, .glm, .kimi, .minimax: return false
         }
     }
 }

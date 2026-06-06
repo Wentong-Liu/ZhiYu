@@ -19,4 +19,13 @@ public struct ProviderConfig: Equatable, Sendable {
     public static func anthropic(model: String) -> ProviderConfig {
         ProviderConfig(name: "Anthropic", baseURL: "https://api.anthropic.com/v1", model: model)
     }
+    public static func glm(model: String) -> ProviderConfig {
+        ProviderConfig(name: "智谱GLM", baseURL: "https://open.bigmodel.cn/api/paas/v4", model: model)
+    }
+    public static func kimi(model: String) -> ProviderConfig {
+        ProviderConfig(name: "Kimi", baseURL: "https://api.moonshot.cn/v1", model: model)
+    }
+    public static func minimax(model: String) -> ProviderConfig {
+        ProviderConfig(name: "MiniMax", baseURL: "https://api.minimaxi.com/v1", model: model)
+    }
 }
