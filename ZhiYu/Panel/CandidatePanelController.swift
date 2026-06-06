@@ -42,6 +42,8 @@ final class CandidatePanelController: NSObject {
     private var lastCheapSignature: String?
     /// 一次 present 的 Task 是否在飞：转文字会改动微信 AX→触发 watcher，须在此期间抑制自动评估的 re-entry，避免重复弹。
     private var isBusy = false
+    /// 忙碌期到达的新消息标记：忙碌时不消费 lastCheapSignature（否则会被永久去重丢弃），仅置位；忙碌结束补跑评估。
+    private var pendingRecheck = false
     /// present 代际令牌：新 present 取代在飞旧 present 时自增，旧 Task 完成时凭此识别自己已陈旧、不再写回。
     private var presentGeneration = 0
     /// 当前在飞的 present 任务：ESC/dismiss 时取消，让转写循环立即停、不再 AXShowMenu/把微信拉前台。
@@ -149,6 +151,7 @@ final class CandidatePanelController: NSObject {
                 if result.candidates.isEmpty && result.stickerKeyword == nil { self.model.status = "模型没有返回候选" }
                 self.relayout()  // 内容到位后按真实高度重新布局
                 self.isBusy = false
+                self.drainPendingRecheck()  // 忙碌期到过新消息则补跑评估
             } catch {
                 guard generation == self.presentGeneration else { return }  // 陈旧任务：新 present 已接管，不写、不动 isBusy
                 self.model.isLoading = false
@@ -157,6 +160,7 @@ final class CandidatePanelController: NSObject {
                 self.model.status = Self.userFacingMessage(for: error)
                 self.relayout()
                 self.isBusy = false
+                self.drainPendingRecheck()  // 忙碌期到过新消息则补跑评估
             }
         }
     }
@@ -173,8 +177,17 @@ final class CandidatePanelController: NSObject {
         guard AppConfig.shared.autoOnNewMessage else { return }
         if let cheap = WeChatAXProbe.cheapSignature() {
             guard cheap != lastCheapSignature else { return }
+            // 忙碌期绝不写 lastCheapSignature（否则这条新指纹被消费却没处理，之后被去重永久丢）：仅置位，忙碌结束补跑。
+            if isBusy { pendingRecheck = true; return }
             lastCheapSignature = cheap
         }
+        evaluateAuto(canPresent: isWeChatFrontmost())
+    }
+
+    /// 忙碌结束补跑：忙碌期到过新消息（pendingRecheck）则复位标记并重新评估当前会话。
+    private func drainPendingRecheck() {
+        guard pendingRecheck else { return }
+        pendingRecheck = false
         evaluateAuto(canPresent: isWeChatFrontmost())
     }
 
@@ -350,6 +363,7 @@ final class CandidatePanelController: NSObject {
         if let m = escGlobalMonitor { NSEvent.removeMonitor(m); escGlobalMonitor = nil }
         panel?.close()
         panel = nil
+        drainPendingRecheck()  // 忙碌期到过新消息则补跑评估
     }
 
     /// 主显示器（含 AppKit 全局原点、frame.origin == (0,0) 的屏）的高度；AX/CG 全局 y 翻转的基准。
