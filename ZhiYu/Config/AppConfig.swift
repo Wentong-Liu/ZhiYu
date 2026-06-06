@@ -4,6 +4,7 @@ import ZhiYuCore
 enum ProviderKind: String, CaseIterable, Identifiable {
     case openAI = "OpenAI"
     case deepSeek = "DeepSeek"
+    case anthropic = "Anthropic"
     case chatGPT = "ChatGPT 登录"
     var id: String { rawValue }
 
@@ -15,6 +16,10 @@ enum ProviderKind: String, CaseIterable, Identifiable {
                     ("gpt-5.3", "GPT-5.3"), ("gpt-4o", "GPT-4o")]
         case .deepSeek:
             return [("deepseek-v4-flash", "Flash"), ("deepseek-v4-pro", "Pro")]
+        case .anthropic:
+            return [("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+                    ("claude-opus-4-8", "Claude Opus 4.8"),
+                    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5")]
         case .chatGPT:
             return [("gpt-5.5", "GPT-5.5"), ("gpt-5.5-pro", "GPT-5.5 Pro"),
                     ("gpt-5.4", "GPT-5.4"), ("gpt-5.4-pro", "GPT-5.4 Pro"),

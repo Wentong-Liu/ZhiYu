@@ -2,10 +2,11 @@ import SwiftUI
 import Combine
 import ZhiYuCore
 
-/// 设置里把 OpenAI(API Key) 与 ChatGPT 登录归为同一"家族"(OpenAI)，DeepSeek 单独一家族。
+/// 设置里把 OpenAI(API Key) 与 ChatGPT 登录归为同一"家族"(OpenAI)，DeepSeek / Anthropic 各自单独一家族。
 enum ProviderFamily: String, CaseIterable, Identifiable {
     case openAI = "OpenAI"
     case deepSeek = "DeepSeek"
+    case anthropic = "Anthropic"
     var id: String { rawValue }
 }
 
@@ -28,13 +29,18 @@ final class SettingsModel: ObservableObject {
     var currentKind: ProviderKind {
         switch family {
         case .deepSeek: return .deepSeek
+        case .anthropic: return .anthropic
         case .openAI: return openAIUsesChatGPT ? .chatGPT : .openAI
         }
     }
 
     init() {
         let k = AppConfig.shared.providerKind
-        family = (k == .deepSeek) ? .deepSeek : .openAI
+        switch k {
+        case .deepSeek: family = .deepSeek
+        case .anthropic: family = .anthropic
+        default: family = .openAI
+        }
         openAIUsesChatGPT = (k == .chatGPT)
         let valid = k.modelOptions.map(\.id)
         model = valid.contains(AppConfig.shared.model) ? AppConfig.shared.model : k.defaultModel
@@ -44,6 +50,7 @@ final class SettingsModel: ObservableObject {
         switch k {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
+        case .anthropic: apiKey = KeychainStore.anthropicKey()
         case .chatGPT: apiKey = ""
         }
         customPrompt = AppConfig.shared.customPrompt
@@ -57,6 +64,7 @@ final class SettingsModel: ObservableObject {
         switch k {
         case .openAI: apiKey = KeychainStore.openAIKey()
         case .deepSeek: apiKey = KeychainStore.deepSeekKey()
+        case .anthropic: apiKey = KeychainStore.anthropicKey()
         case .chatGPT: apiKey = ""
         }
         loggedIn = KeychainStore.loadChatGPTTokens() != nil
@@ -69,6 +77,8 @@ final class SettingsModel: ObservableObject {
             status = KeychainStore.setOpenAIKey(k) ? "已保存 OpenAI Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
         case .deepSeek:
             status = KeychainStore.setDeepSeekKey(k) ? "已保存 DeepSeek Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
+        case .anthropic:
+            status = KeychainStore.setAnthropicKey(k) ? "已保存 Anthropic Key" : "保存失败：无法写入钥匙串，请检查权限后重试"
         case .chatGPT: break
         }
     }
@@ -147,6 +157,7 @@ struct SettingsView: View {
             VStack(spacing: 8) {
                 openAIRow
                 deepSeekRow
+                anthropicRow
             }
         }
     }
@@ -184,6 +195,17 @@ struct SettingsView: View {
                      onSelect: { vm.family = .deepSeek }) {
             HStack(spacing: 10) {
                 SecureField("DeepSeek API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
+                Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
+            }
+        }
+    }
+
+    private var anthropicRow: some View {
+        providerCard(selected: vm.family == .anthropic, title: "Anthropic",
+                     subtitle: "Claude · API Key",
+                     onSelect: { vm.family = .anthropic }) {
+            HStack(spacing: 10) {
+                SecureField("Anthropic API Key", text: $vm.apiKey).textFieldStyle(.roundedBorder)
                 Button("保存") { vm.saveKey() }.buttonStyle(MonoButton(filled: true))
             }
         }

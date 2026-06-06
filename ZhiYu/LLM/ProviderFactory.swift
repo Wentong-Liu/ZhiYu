@@ -15,6 +15,10 @@ enum ProviderFactory {
             let k = KeychainStore.deepSeekKey().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !k.isEmpty else { throw ProviderError.missingAPIKey }
             return OpenAICompatibleProvider(config: .deepSeek(model: cfg.model), apiKey: k)
+        case .anthropic:
+            let k = KeychainStore.anthropicKey().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !k.isEmpty else { throw ProviderError.missingAPIKey }
+            return AnthropicProvider(config: .anthropic(model: cfg.model), apiKey: k)
         case .chatGPT:
             guard let tokens = await CodexLoginService.shared.validTokens() else {
                 throw ProviderError.missingAPIKey

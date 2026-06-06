@@ -16,4 +16,7 @@ public struct ProviderConfig: Equatable, Sendable {
     public static func deepSeek(model: String) -> ProviderConfig {
         ProviderConfig(name: "DeepSeek", baseURL: "https://api.deepseek.com", model: model)
     }
+    public static func anthropic(model: String) -> ProviderConfig {
+        ProviderConfig(name: "Anthropic", baseURL: "https://api.anthropic.com/v1", model: model)
+    }
 }

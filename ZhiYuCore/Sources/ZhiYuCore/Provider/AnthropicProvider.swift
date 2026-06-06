@@ -1,0 +1,139 @@
+import Foundation
+
+/// 调用 Anthropic（Claude）Messages API（POST /messages，非流式）。
+/// Anthropic 协议与 OpenAI 不兼容：system 走顶层字段、鉴权用 x-api-key、content 可为字符串或内容块数组。
+/// Key 由调用方传入（不读 Keychain，保持可测）。
+public struct AnthropicProvider: LLMProvider {
+    private let config: ProviderConfig
+    private let apiKey: String
+    private let session: URLSession
+
+    /// 单次请求超时（秒）。非流式 messages 一次性返回，给足整体上限即可。
+    private static let requestTimeout: TimeInterval = 60
+    /// Anthropic API 版本头（固定）。
+    private static let apiVersion = "2023-06-01"
+
+    public init(config: ProviderConfig, apiKey: String, session: URLSession = .shared) {
+        self.config = config
+        self.apiKey = apiKey
+        self.session = session
+    }
+
+    // MARK: - 线上请求模型
+
+    /// 图片内容块的 source（base64）。
+    private struct WireImageSource: Encodable {
+        let type = "base64"
+        let media_type: String
+        let data: String
+    }
+
+    /// 一条 message 的 content：要么是纯字符串，要么是内容块数组（文本块 + 图片块）。
+    /// 用自定义 Encodable 表达这种多态。
+    private enum WireContent: Encodable {
+        case text(String)
+        case blocks(text: String, images: [WireImageSource])
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .text(s):
+                var c = encoder.singleValueContainer()
+                try c.encode(s)
+            case let .blocks(text, images):
+                var c = encoder.unkeyedContainer()
+                try c.encode(TextBlock(text: text))
+                for img in images { try c.encode(ImageBlock(source: img)) }
+            }
+        }
+
+        private struct TextBlock: Encodable { let type = "text"; let text: String }
+        private struct ImageBlock: Encodable { let type = "image"; let source: WireImageSource }
+    }
+
+    private struct WireMessage: Encodable { let role: String; let content: WireContent }
+
+    private struct RequestBody: Encodable {
+        let model: String
+        let max_tokens: Int
+        let temperature: Double
+        /// 为空时省略（Optional + 自动省略 nil）。
+        let system: String?
+        let messages: [WireMessage]
+    }
+
+    private struct ResponseBody: Decodable {
+        struct Block: Decodable { let type: String; let text: String? }
+        let content: [Block]
+    }
+
+    // MARK: - 调用
+
+    public func complete(messages: [LLMMessage]) async throws -> String {
+        guard !apiKey.isEmpty else { throw ProviderError.missingAPIKey }
+        guard let url = URL(string: config.baseURL + "/messages") else {
+            throw ProviderError.invalidResponse
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = Self.requestTimeout
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
+
+        // system 走顶层字段：所有 role==.system 的 content 用两个换行连接；为空则省略。
+        let systemText = messages.filter { $0.role == .system }
+            .map(\.content)
+            .joined(separator: "\n\n")
+        let system: String? = systemText.isEmpty ? nil : systemText
+
+        // 其余消息进 messages 数组；.user -> "user"，.assistant -> "assistant"。
+        let wire: [WireMessage] = messages.compactMap { msg in
+            let role: String
+            switch msg.role {
+            case .system: return nil
+            case .user: role = "user"
+            case .assistant: role = "assistant"
+            }
+            return WireMessage(role: role, content: Self.wireContent(for: msg))
+        }
+
+        req.httpBody = try JSONEncoder().encode(
+            RequestBody(model: config.model, max_tokens: 1024, temperature: 0.9,
+                        system: system, messages: wire))
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw ProviderError.network(error.localizedDescription)
+        }
+        let http = try HTTPResponseValidator.httpResponse(from: response)
+        try HTTPResponseValidator.throwIfHTTPError(http, body: String(data: data, encoding: .utf8) ?? "")
+        guard let parsed = try? JSONDecoder().decode(ResponseBody.self, from: data) else {
+            throw ProviderError.invalidResponse
+        }
+        return parsed.content
+            .filter { $0.type == "text" }
+            .compactMap(\.text)
+            .joined()
+    }
+
+    /// 把一条 LLMMessage 转成线上 content：无图直接字符串，有图则「文本块 + 图片块数组」。
+    private static func wireContent(for msg: LLMMessage) -> WireContent {
+        let images = msg.imageDataURLs.compactMap(parseDataURL)
+        if images.isEmpty { return .text(msg.content) }
+        return .blocks(text: msg.content, images: images)
+    }
+
+    /// 解析 "data:image/png;base64,XXXX" 形式：取 data: 与 ;base64 之间为 media_type、逗号后为 base64。
+    /// 解析不出的返回 nil（调用方跳过该图）。
+    private static func parseDataURL(_ s: String) -> WireImageSource? {
+        guard s.hasPrefix("data:"),
+              let semicolon = s.range(of: ";base64,") else { return nil }
+        let mediaType = String(s[s.index(s.startIndex, offsetBy: 5)..<semicolon.lowerBound])
+        let base64 = String(s[semicolon.upperBound...])
+        guard !mediaType.isEmpty, !base64.isEmpty else { return nil }
+        return WireImageSource(media_type: mediaType, data: base64)
+    }
+}
