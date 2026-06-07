@@ -204,8 +204,10 @@ final class CandidatePanelController: NSObject {
     }
 
     /// 忙碌结束补跑：忙碌期到过新消息（pendingRecheck）则复位标记并重新评估当前会话。
+    /// 仅在非忙碌时 drain；忙碌则保留标记待下次（延后的 drain 可能赶上新一轮 isBusy=true，
+    /// 此时若清掉标记会让这次忙碌期的新消息补跑丢失，故忙碌时直接返回、不清标记，留到下次 isBusy 转 false 再 drain）。
     private func drainPendingRecheck() {
-        guard pendingRecheck else { return }
+        guard pendingRecheck, !isBusy else { return }
         pendingRecheck = false
         evaluateAuto(canPresent: isWeChatFrontmost())
     }
