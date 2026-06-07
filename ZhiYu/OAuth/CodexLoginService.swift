@@ -138,9 +138,12 @@ final class CodexLoginService {
                 return nil
             }
             let refreshed = try ChatGPTOAuth.parseTokenResponse(data, fallbackRefresh: tokens.refreshToken)
-            // 非破坏写已保旧值不丢；持久化失败仅记日志，本次仍用内存中的 refreshed。
-            if !KeychainStore.saveChatGPTTokens(refreshed) {
-                NSLog("[ZhiYu][CodexLogin] 刷新 token 持久化失败")
+            // refresh token 会轮换：旧 token 换到新值后即被服务端作废。若新值没落盘，
+            // 钥匙串里仍是已失效的旧 token，下次启动刷新即失败被登出。故保存失败如实返回 nil，
+            // 不把未持久化的凭据当成功。
+            guard KeychainStore.saveChatGPTTokens(refreshed) else {
+                NSLog("[ZhiYu][CodexLogin] 刷新 token 持久化失败，放弃本次（避免轮换后未落盘致下次启动失效）")
+                return nil
             }
             return refreshed
         } catch {
