@@ -49,6 +49,8 @@ enum StickerSender {
         guard let window = WeChatAXProbe.focusedOrMainWindow(of: appEl) else { fail("拿不到微信窗口"); return false }
         let panelRoot = WeChatAXProbe.rightPanelRoot(window: window)
         guard let emojiBtn = findButton(in: panelRoot, title: WeChatMarkers.emojiButtonTitle) else { fail("未找到「表情」按钮"); return false }
+        // 前序 AXPress：容忍其返回非 .success——下一步用 poll 轮询 popover 出现做补偿，
+        // 即便单次 Press 报错只要面板最终弹出仍能继续，故此处不校验返回值、不中止。
         AXUIElementPerformAction(emojiBtn, AXAction.press as CFString)
 
         // 2) 等 popover（app 顶层浅查，避免 DFS 扎进左侧巨表导致误返回 nil/变慢）。
@@ -68,6 +70,8 @@ enum StickerSender {
         guard let field = await poll(timeout: searchFieldPollTimeout, { searchField(in: popover) }) else { fail("未进入表情搜索框"); return false }
 
         // 4) 写关键词 + 回车。
+        // 前序 AXConfirm：容忍其返回非 .success——下一步用 poll 轮询搜索结果出现做补偿，
+        // 即便 Confirm 单次报错只要结果最终出现仍能继续，故此处不校验返回值、不中止。
         AXUIElementSetAttributeValue(field, AXAttr.value as CFString, keyword as CFString)
         AXUIElementPerformAction(field, AXAction.confirm as CFString)
 
@@ -79,7 +83,10 @@ enum StickerSender {
         guard let target = await poll(timeout: resultRelocatePollTimeout, { firstResultCell(in: popover) }) else { fail("结果重定位失败"); return false }
         // 真正发出表情前再校验会话身份：等待期间用户可能切会话，切了就中止不发。默认放行（isCurrentContact 内部处理）。
         guard WeChatAXProbe.isCurrentContact(targetContact) else { fail("会话已切换，已取消发表情"); return false }
-        AXUIElementPerformAction(target, AXAction.press as CFString)
+        // 最后决定性的 AXPress（真正把表情发出去）：与前序补偿型 Press 不同，这一步没有后续轮询兜底，
+        // 失败即表情未发出。故校验 == .success，失败走 fail(...) 返回 false，不再无条件记成功日志。
+        let pressResult = AXUIElementPerformAction(target, AXAction.press as CFString)
+        guard pressResult == .success else { fail("AXPress 第一个结果失败(err=\(pressResult.rawValue))，表情未发出"); return false }
         NSLog("[StickerSender] 已 AXPress 第一个结果，关键词=%@", keyword)
         return true
     }
@@ -97,6 +104,10 @@ enum StickerSender {
     /// 特征：矮(height≤80) 且 横向铺满(宽度≥popover 宽度一半，排除窄 Tab 条)；取**最靠底**的那条。
     private static func bottomToolbarFirstItem(in popover: AXUIElement) -> AXUIElement? {
         let popW = WeChatAXProbe.frame(of: popover)?.width ?? 0
+        if popW <= 0 {
+            // 读不到 popover 宽度：下面的「横向铺满」宽度判定被短路放行，可能选错工具栏。记一条 warning 助排查。
+            NSLog("[StickerSender] 警告：popover 宽度读取为 0，工具栏横向铺满判定被短路放行")
+        }
         var scrolls: [AXUIElement] = []
         collectRole(AXRole.scrollArea, in: popover, into: &scrolls)
         let toolbar = scrolls

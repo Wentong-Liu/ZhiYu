@@ -74,18 +74,30 @@ enum InserterProbe {
         return true
     }
 
-    /// 模拟回车发送。
-    static func sendReturn() {
+    /// 模拟回车发送。返回是否成功投递（down/up 两个 CGEvent 都成功创建并 post）。
+    @discardableResult
+    static func sendReturn() -> Bool {
         postKey(keyCodeReturn, flags: [])               // Return
     }
 
-    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
+    /// 投递一对 keyDown/keyUp 的 CGEvent（正常成功路径行为不变：照常 .cghidEventTap post）。
+    /// 返回是否成功投递：CGEventSource / down / up 任一为 nil（系统未能建事件）时，
+    /// 回车不会真正发出——过去此处静默丢失，现补一条 NSLog + 一声 NSSound.beep，并返回 false。
+    @discardableResult
+    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) -> Bool {
         let src = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true)
-        down?.flags = flags
         let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false)
-        up?.flags = flags
-        down?.post(tap: .cghidEventTap)
-        up?.post(tap: .cghidEventTap)
+        guard let down, let up else {
+            NSLog("[ZhiYu] postKey 失败：CGEvent 创建为 nil(src=%@ down=%@ up=%@)，回车未发出",
+                  src == nil ? "nil" : "ok", down == nil ? "nil" : "ok", up == nil ? "nil" : "ok")
+            NSSound.beep()
+            return false
+        }
+        down.flags = flags
+        up.flags = flags
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
     }
 }

@@ -22,7 +22,11 @@ enum Inserter {
     /// 返回是否已发出回车（写入失败或始终不就绪则不回车，返回 false）。
     static func fillAndSend(_ text: String, completion: @escaping (Bool) -> Void) {
         let ok = InserterProbe.setText(text)
-        _ = InserterProbe.focusComposerAndActivate()
+        // 定位不到 composer 时 focusComposerAndActivate 返回 false：聚焦失败过去静默忽略，现补日志。
+        // 不改正常流程（成功路径行为不变，仍继续轮询发送）。
+        if !InserterProbe.focusComposerAndActivate() {
+            NSLog("[ZhiYu] fillAndSend 聚焦失败：定位不到 composer（仅微信切前台），将靠前台/既有焦点兜底")
+        }
         guard ok else { completion(false); return }
         pollUntilReady(text, deadline: .now() + readinessTimeout, completion: completion)
     }
@@ -35,8 +39,10 @@ enum Inserter {
         let written = (InserterProbe.composerValue() ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if written.contains(target), InserterProbe.isWeChatFrontFocused() {
-            InserterProbe.sendReturn()
-            completion(true)
+            // 据 sendReturn 实际投递结果决定 completion：回车未真正发出（CGEvent 建失败）时返回 false，
+            // 让逐条发送停止后续以免覆盖/乱序。正常成功路径 sendReturn 返回 true，行为不变。
+            let posted = InserterProbe.sendReturn()
+            completion(posted)
             return
         }
         guard DispatchTime.now() < deadline else { completion(false); return }
