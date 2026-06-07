@@ -7,6 +7,11 @@ enum Inserter {
     private static let readinessPollInterval: TimeInterval = 0.06
     /// 发送前轮询的总超时（超过仍不就绪则放弃回车，约 1.5s）。
     private static let readinessTimeout: TimeInterval = 1.5
+    /// 回车后轮询确认 composer 已清空（=微信真发出）的总超时。取够宽：真发出后 composer
+    /// 几乎瞬间清空；宽超时避免「真发了但清慢了」被误判失败而漏掉后面几条。
+    private static let sendConfirmTimeout: TimeInterval = 1.5
+    /// 回车 post 后先让微信处理一次键盘事件，再开始 AX 读取确认，避免确认读值抢在发送处理之前。
+    private static let sendConfirmInitialDelay: TimeInterval = 0.2
     /// 逐条发送时，上一条发出后到发下一条之间的间隔（叠加 fillAndSend 内部时序，约 0.8s/条）。
     private static let sequentialSendGap: TimeInterval = 0.4
 
@@ -39,15 +44,43 @@ enum Inserter {
         let written = (InserterProbe.composerValue() ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if written.contains(target), InserterProbe.isWeChatFrontFocused() {
-            // 据 sendReturn 实际投递结果决定 completion：回车未真正发出（CGEvent 建失败）时返回 false，
-            // 让逐条发送停止后续以免覆盖/乱序。正常成功路径 sendReturn 返回 true，行为不变。
-            let posted = InserterProbe.sendReturn()
-            completion(posted)
+            // CGEvent post 失败（回车没投出去）直接 false，让逐条发送停止后续以免覆盖/乱序。
+            guard InserterProbe.sendReturn() else { completion(false); return }
+            // post 成功 ≠ 微信真发出：紧跟 activate()、键盘焦点没落稳时回车可能被忽略，
+            // 第一条只是短暂出现在 composer。故再轮询确认 composer 清空（=真发出）才算成功，
+            // 超时仍在则 false 停后续，避免下一条 setText 覆盖首条导致首条丢失。
+            DispatchQueue.main.asyncAfter(deadline: .now() + sendConfirmInitialDelay) {
+                pollUntilSent(text, deadline: .now() + sendConfirmTimeout, completion: completion)
+            }
             return
         }
         guard DispatchTime.now() < deadline else { completion(false); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + readinessPollInterval) {
             pollUntilReady(text, deadline: deadline, completion: completion)
+        }
+    }
+
+    /// 递归轮询确认「微信已真把这条发出去」：composer（trim 后）不再 contains 目标（trim 后）
+    /// 即视为已清空发出 → completion(true)；超时仍含目标 → completion(false)（没真发出，停后续）。
+    private static func pollUntilSent(_ text: String,
+                                      deadline: DispatchTime,
+                                      completion: @escaping (Bool) -> Void) {
+        let target = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = InserterProbe.composerValue() else {
+            guard DispatchTime.now() < deadline else { completion(false); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + readinessPollInterval) {
+                pollUntilSent(text, deadline: deadline, completion: completion)
+            }
+            return
+        }
+        let current = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.contains(target) {
+            completion(true)
+            return
+        }
+        guard DispatchTime.now() < deadline else { completion(false); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + readinessPollInterval) {
+            pollUntilSent(text, deadline: deadline, completion: completion)
         }
     }
 

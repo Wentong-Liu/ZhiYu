@@ -40,19 +40,14 @@ enum InserterProbe {
         return WeChatAXProbe.copyBool(field, AXAttr.focused)
     }
 
-    /// 回车前的前台/焦点二次校验：activate() 是异步 fire-and-forget，AXValue 写入成功不代表
-    /// 微信已是前台键盘焦点持有者；这里显式校验「微信已在前台」，并尽量结合 composer AXFocused。
-    /// 满足任一强信号即视为可回车：
-    /// - 微信进程 isActive（NSWorkspace.frontmostApplication 即微信）—— 前台已落定的权威信号；
-    /// - composer AXFocused == true —— 输入框已持有键盘焦点。
-    /// 二者都拿不到肯定信号时返回 false，调用方应放弃回车以免事件进错窗口导致整条不发送。
+    /// 回车前的前台二次校验：activate() 是异步 fire-and-forget，AXValue 写入成功不代表
+    /// 微信已是前台键盘事件接收者；只有微信已经 active/frontmost 时才允许回车，避免事件进错窗口。
     static func isWeChatFrontFocused() -> Bool {
         let appActive = WeChatAXProbe.findWeChatApp()?.isActive ?? false
         // 复用统一身份判定（bundle id + 本地化名兜底），与 WeChatAXProbe.isWeChat 同口径。
         let frontIsWeChat = NSWorkspace.shared.frontmostApplication
             .map(WeChatAXProbe.isWeChat) ?? false
-        let focused = composerFocused() ?? false
-        return appActive || frontIsWeChat || focused
+        return appActive || frontIsWeChat
     }
 
     /// AX 写入后用于发送前的「激活 + 聚焦」：
