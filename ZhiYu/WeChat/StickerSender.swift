@@ -32,14 +32,14 @@ enum StickerSender {
     /// poll() 的轮询步进（纳秒，60ms，更跟手）。
     private static let pollStepNanos: UInt64 = 60_000_000
 
-    static func send(keyword: String) {
+    static func send(keyword: String, targetContact: String? = nil) {
         let kw = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !kw.isEmpty else { return }
-        Task { _ = await run(keyword: kw) }
+        Task { _ = await run(keyword: kw, targetContact: targetContact) }
     }
 
     @discardableResult
-    static func run(keyword: String) async -> Bool {
+    static func run(keyword: String, targetContact: String? = nil) async -> Bool {
         guard AXIsProcessTrusted(), let app = WeChatAXProbe.findWeChatApp() else { fail("无辅助功能权限或未找到微信"); return false }
         app.activate(options: [])
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
@@ -77,6 +77,8 @@ enum StickerSender {
         try? await Task.sleep(nanoseconds: resultGridSettleNanos)  // 让结果网格排序稳定
         // 不复用首次句柄（结果可能整体重建而失效），稳定后重新定位。
         guard let target = await poll(timeout: resultRelocatePollTimeout, { firstResultCell(in: popover) }) else { fail("结果重定位失败"); return false }
+        // 真正发出表情前再校验会话身份：等待期间用户可能切会话，切了就中止不发。默认放行（isCurrentContact 内部处理）。
+        guard WeChatAXProbe.isCurrentContact(targetContact) else { fail("会话已切换，已取消发表情"); return false }
         AXUIElementPerformAction(target, AXAction.press as CFString)
         NSLog("[StickerSender] 已 AXPress 第一个结果，关键词=%@", keyword)
         return true

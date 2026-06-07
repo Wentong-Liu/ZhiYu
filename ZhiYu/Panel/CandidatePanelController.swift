@@ -264,7 +264,7 @@ final class CandidatePanelController: NSObject {
         self.anchorAXFrame = axFrame
         model.onFill = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.fill(t) } else { NSSound.beep() }; self.dismiss() }
         model.onSend = { [weak self] t in guard let self else { return }; if self.guardSameConversation() { Inserter.sendSequential(BubbleSplitter.split(t), targetContact: self.presentTargetContact) } else { NSSound.beep() }; self.dismiss() }
-        model.onSendSticker = { [weak self] kw in guard let self else { return }; self.dismiss(); if self.guardSameConversation() { StickerSender.send(keyword: kw) } else { NSSound.beep() } }
+        model.onSendSticker = { [weak self] kw in guard let self else { return }; self.dismiss(); if self.guardSameConversation() { StickerSender.send(keyword: kw, targetContact: self.presentTargetContact) } else { NSSound.beep() } }
         model.onDismiss = { [weak self] in self?.dismiss() }
         // 拖动松手：把面板当前原点相对实时自动锚点的差值记为手动偏移并持久化（跟随微信窗口）。
         model.onDragMoved = { [weak self] in
