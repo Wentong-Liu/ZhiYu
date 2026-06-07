@@ -28,7 +28,9 @@ struct CandidatePanelView: View {
     /// 面板内容宽度（不含 shadowPad）。控制器测高/定位时按此计算窗口宽度，故须与此处 frame 同源。
     static let baseWidth: CGFloat = 440
 
-    /// 候选卡片圆角。
+    /// 外层面板卡片圆角。
+    private static let panelCornerRadius: CGFloat = 20
+    /// 候选卡片圆角（贴纸建议块复用同值）。
     private static let cardCornerRadius: CGFloat = 13
     /// 候选卡片底色不透明度：(默认, 悬停)。
     private static let cardFillOpacity: (normal: Double, hover: Double) = (0.05, 0.12)
@@ -52,10 +54,10 @@ struct CandidatePanelView: View {
         .frame(width: Self.baseWidth)
         .frame(maxHeight: scrollable ? maxHeight : nil)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.panelCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: Self.panelCornerRadius, style: .continuous)
                         .fill(Color.black.opacity(0.62))
                 )
         )
@@ -178,8 +180,8 @@ struct CandidatePanelView: View {
                         .foregroundStyle(.white.opacity(0.8))
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.white.opacity(0.06)))
-                .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(.white.opacity(0.10), lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).fill(.white.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).strokeBorder(.white.opacity(0.10), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .help("用微信表情搜索发出第一个结果")

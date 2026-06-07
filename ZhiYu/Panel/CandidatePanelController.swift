@@ -7,6 +7,16 @@ import ZhiYuCore
 final class CandidatePanelController: NSObject {
     static let shared = CandidatePanelController()
 
+    /// ESC 键的两种比对口径（同源，避免散落三处魔法值）：
+    /// - NSEvent.charactersIgnoringModifiers 比对字符；CGEventTap 比对硬件键码。
+    /// 风格对齐 InserterProbe.keyCodeReturn=36。
+    private enum KeyCode {
+        /// ESC 的硬件键码（CGEventTap 用）。
+        static let escape: Int64 = 53
+        /// ESC 的字符（NSEvent 监听用，charactersIgnoringModifiers 比对）。
+        static let escapeChar = "\u{1B}"
+    }
+
     /// 面板布局常量。
     private enum Layout {
         /// 面板底边与 composer 顶边的间隙。
@@ -15,6 +25,12 @@ final class CandidatePanelController: NSObject {
         static let minHeight: CGFloat = 220
         /// 面板高度相对屏 visibleFrame 上下留白。
         static let screenMargin: CGFloat = 24
+        /// 取不到屏 visibleFrame 时的兜底矩形。
+        static let fallbackVisibleFrame = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        /// 取不到主屏高度时的兜底（AX↔AppKit 全局 y 翻转基准）。
+        static let fallbackPrimaryHeight: CGFloat = 1000
+        /// 新建 NSPanel 时的初始高度（建后即按内容 relayout）。
+        static let initialPanelHeight: CGFloat = 120
     }
 
     /// 用户拖动后记录的"相对自动锚点的偏移"（跟随微信窗口：自动锚点实时算，叠加此偏移即最终位置）。
@@ -291,7 +307,7 @@ final class CandidatePanelController: NSObject {
             self.relayout()
         }
 
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: CandidatePanelView.baseWidth, height: 120),
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: CandidatePanelView.baseWidth, height: Layout.initialPanelHeight),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.level = .floating
         p.isOpaque = false
@@ -314,7 +330,7 @@ final class CandidatePanelController: NSObject {
 
         let screen = screenContaining(axPointTopLeft: CGPoint(x: axFrame.midX, y: axFrame.minY))
             ?? NSScreen.main ?? NSScreen.screens.first
-        let vf = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let vf = screen?.visibleFrame ?? Layout.fallbackVisibleFrame
         let available = max(Layout.minHeight, vf.height - Layout.screenMargin)
 
         // 测自然高度（含 2*pad 外边距）。
@@ -372,19 +388,19 @@ final class CandidatePanelController: NSObject {
                 }
                 return nil
             }
-            if chars == "\u{1B}" { // Esc
+            if chars == KeyCode.escapeChar { // Esc
                 self.dismiss(); return nil
             }
             return event
         }
         escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel != nil else { return }
-            if (event.charactersIgnoringModifiers ?? "") == "\u{1B}" { self.dismiss() }
+            if (event.charactersIgnoringModifiers ?? "") == KeyCode.escapeChar { self.dismiss() }
         }
         installEscEventTap()
     }
 
-    /// 面板存活期临时装一个 CGEventTap 拦截 keyDown：仅 ESC(keyCode 53) 时 dismiss() 并吞掉事件
+    /// 面板存活期临时装一个 CGEventTap 拦截 keyDown：仅 ESC(KeyCode.escape) 时 dismiss() 并吞掉事件
     /// （面板 .nonactivatingPanel/不抢焦点，ESC 实际仍发给微信→系统蜂鸣，故需在这里吞掉）。
     /// 其余事件一律原样放行（含回车 keyCode 36，发送不受影响）；创建失败时回退到上面的 local/global NSEvent 监听（仅能关面板、仍有蜂鸣）。
     private func installEscEventTap() {
@@ -399,7 +415,7 @@ final class CandidatePanelController: NSObject {
                 }
                 return Unmanaged.passUnretained(event)
             }
-            if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {  // 53 = ESC
+            if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == KeyCode.escape {  // ESC
                 if let refcon {
                     let ctrl = Unmanaged<CandidatePanelController>.fromOpaque(refcon).takeUnretainedValue()
                     MainActor.assumeIsolated { ctrl.dismiss() }
@@ -437,7 +453,7 @@ final class CandidatePanelController: NSObject {
     private static var primaryScreenHeight: CGFloat {
         let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero })
             ?? NSScreen.screens.first
-        return primary?.frame.height ?? 1000
+        return primary?.frame.height ?? Layout.fallbackPrimaryHeight
     }
 
     private func screenContaining(axPointTopLeft p: CGPoint) -> NSScreen? {
