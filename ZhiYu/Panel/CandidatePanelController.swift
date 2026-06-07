@@ -104,12 +104,16 @@ final class CandidatePanelController: NSObject {
         // 不再排在同步读之后，可立即触发 dismiss()，面板秒关。Task 在 @MainActor 类里继承 @MainActor，
         // 故 await 之后回到主线程，访问 self 状态安全。
         Task { [weak self] in
+            #if DEBUG
             let t0 = Date()
+            #endif
             let snap = await Task.detached { WeChatReader.readSnapshot() }.value  // 读会话在后台线程
             guard let self else { return }
             // 期间已 ESC/dismiss(panel=nil) 或被新 present 取代 → 丢弃，绝不在已关闭/已被取代的面板上继续。
             guard generation == self.presentGeneration, self.panel != nil else { return }
+            #if DEBUG
             NSLog("[ZhiYu] trigger readSnapshot %.0fms", Date().timeIntervalSince(t0) * 1000)
+            #endif
             guard let snap, !snap.context.messages.isEmpty else { self.dismiss(); NSSound.beep(); return }
             // 复用记住的位置：读回来只用于出候选，不重定位面板（避免跳动）。位置由首次读取确立、之后靠手动拖动调整。
             self.lastSeenSig[snap.context.contactName] = MessageSignal.signature(snap.context)
@@ -347,7 +351,7 @@ final class CandidatePanelController: NSObject {
         }
         panel.setContentSize(NSSize(width: width, height: panelH))
 
-        // 自动锚点叠加手动偏移再夹紧进可见区。manualOffset 为 .zero 时与原"自动锚点+两次夹紧"逐像素一致。
+        // 自动锚点叠加手动偏移后由 PanelPositioning.clamped 单次夹紧进可见区。manualOffset 为 .zero 时退化为纯自动锚点。
         let origin = PanelPositioning.clamped(origin: autoOrigin(), offset: manualOffset,
                                               size: CGSize(width: width, height: panelH), within: vf)
         panel.setFrameOrigin(origin)

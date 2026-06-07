@@ -10,7 +10,7 @@ enum VoiceTranscriber {
     /// 并发护栏：避免两处（如 prewarm + present）同时驱动右键菜单互相打架。
     private static var isRunning = false
 
-    // MARK: - 启发式时序常量（值与抽取前完全一致）
+    // MARK: - 启发式时序常量
 
     /// `AXShowMenu` 动作返回耗时（毫秒）的采样判定阈值：
     /// 被微信短暂拒绝时动作约 ~1ms 立即返回；被接受时约 ~50ms（消息超时后）返回。

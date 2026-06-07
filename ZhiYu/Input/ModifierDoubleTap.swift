@@ -2,7 +2,7 @@ import AppKit
 import ZhiYuCore
 
 /// 全局监听「双击某个修饰键」唤起候选面板。具体是哪个键由 AppConfig.shared.triggerKey 决定
-/// （默认右⌘，keyCode=54）。在 flagsChanged 回调里**实时读** triggerKey，用户改设置后立即生效、无需重启监听。
+/// （默认右⌘，键码见 TriggerKey）。在 flagsChanged 回调里**实时读** triggerKey，用户改设置后立即生效、无需重启监听。
 /// 用 flagsChanged 捕捉目标键的「按下」边沿；夹了其它键按下则重置，避免 ⌘C/⌘V 误触。
 @MainActor
 final class ModifierDoubleTap {

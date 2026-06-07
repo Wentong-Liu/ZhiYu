@@ -7,7 +7,7 @@ import ZhiYuCore
 /// 任一步超时则 beep 并中止（不会乱发）。除 🔍 一处坐标点击外全用 AX 动作；坐标运行时从 AX 读取。
 @MainActor
 enum StickerSender {
-    // MARK: - 启发式几何/时序常量（值与抽取前完全一致）
+    // MARK: - 启发式几何/时序常量
 
     /// 底部工具栏(🔍/😀/❤️/表情包 那条)的最大高度（点）：用于从诸多 AXScrollArea 中筛出矮条工具栏。
     private static let toolbarMaxHeight: CGFloat = 80

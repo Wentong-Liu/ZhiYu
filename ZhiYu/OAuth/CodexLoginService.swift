@@ -2,12 +2,12 @@ import AppKit
 import Network
 import ZhiYuCore
 
-/// ChatGPT 登录：起 ChatGPTOAuth.callbackHost:callbackPort（127.0.0.1:1455）回环服务接 OAuth 回调，开浏览器授权，换 token 存 Keychain；按需刷新。
+/// ChatGPT 登录：起 ChatGPTOAuth.callbackHost:callbackPort 回环服务接 OAuth 回调，开浏览器授权，换 token 存 Keychain；按需刷新。
 @MainActor
 final class CodexLoginService {
     static let shared = CodexLoginService()
 
-    /// 登录超时（秒）：用户打开浏览器后若一直不完成授权，到点自动收尾，释放端口 callbackPort(1455)。
+    /// 登录超时（秒）：用户打开浏览器后若一直不完成授权，到点自动收尾，释放端口 callbackPort。
     private static let loginTimeout: TimeInterval = 300
 
     private var listener: NWListener?

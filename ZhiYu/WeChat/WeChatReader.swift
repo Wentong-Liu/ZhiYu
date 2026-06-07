@@ -4,10 +4,8 @@ import ZhiYuCore
 /// 读取微信当前会话为 ChatContext。复用探针验证过的快速 AX 读取。
 @MainActor
 enum WeChatReader {
-    /// 一次 AX 读取的结果：会话上下文 + 输入框屏幕 frame（AX 左上原点坐标，可能为 nil）。
-    /// 双击触发应只读一次，避免两次遍历观察到不一致的 UI 状态（会话切换后消息与输入框来自不同会话）。
-    /// Sendable：全部为值类型（ChatContext/ChatMessage 均 Sendable、CGRect 值类型），
-    /// 可在后台线程读出后安全跨回主线程。
+    /// 一次 AX 读取的单次快照：会话上下文 + 输入框屏幕 frame（AX 左上原点坐标，可能为 nil）。
+    /// Sendable：全部为值类型（ChatContext/ChatMessage 均 Sendable、CGRect 值类型），可在后台线程读出后安全跨回主线程。
     struct Snapshot: Sendable {
         let context: ChatContext
         let composerFrame: CGRect?

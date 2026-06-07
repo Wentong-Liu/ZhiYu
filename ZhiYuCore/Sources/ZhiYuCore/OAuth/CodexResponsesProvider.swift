@@ -56,7 +56,7 @@ public struct CodexResponsesProvider: LLMProvider {
     /// text 字段：{"verbosity":"low"}。
     private struct TextOption: Encodable { let verbosity: String }
 
-    /// Responses 请求体（镜像 OpenAICompatibleProvider.RequestBody 写法，键类型安全）。
+    /// Responses API 请求体：instructions(系统提示) + input(消息序列) + 流式/工具等开关，键类型安全。
     private struct RequestBody: Encodable {
         let model: String
         let store: Bool

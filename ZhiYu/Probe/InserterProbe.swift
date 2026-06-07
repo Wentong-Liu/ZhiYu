@@ -34,7 +34,7 @@ enum InserterProbe {
     }
 
     /// 读取当前 composer 的 AXFocused，用于回车前确认键盘焦点是否真正落在输入框。
-    /// 部分实现可能不暴露该属性（返回 nil），调用方据此做容错（nil 不等于 false，需结合前台校验）。
+    /// 部分实现可能不暴露该属性（返回 nil）：调用方把 nil 视为未知、回退 false，由前台 active/frontmost 兜底。
     static func composerFocused() -> Bool? {
         guard let field = locateComposer() else { return nil }
         return WeChatAXProbe.copyBool(field, AXAttr.focused)
