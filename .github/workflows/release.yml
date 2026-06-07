@@ -105,4 +105,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.APP }}.dmg
-          generate_release_notes: true
+          body: |
+            知语 ZhiYu —— macOS 菜单栏中的微信回复助手。
+
+            下载下方 `ZhiYu.dmg`（已 Developer ID 签名 + Apple 公证，macOS 15+ 双击即可打开）。
