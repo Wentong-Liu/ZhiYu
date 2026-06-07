@@ -9,6 +9,8 @@ import ZhiYuCore
 enum WeChatAXProbe {
     // 微信 Mac 可能的 bundle id（不同版本/渠道可能不同）
     static let bundleIDs = ["com.tencent.xinWeChat", "com.tencent.WeChat"]
+    // 微信本地化名（bundle id 之外的兜底判定）。
+    static let localizedNames = ["WeChat", "微信"]
 
     // AX role 字面量收敛到共享 AXRole（避免常量类型歧义，跨文件复用）。
     private static let roleStaticText = AXRole.staticText
@@ -97,7 +99,7 @@ enum WeChatAXProbe {
     /// findWeChatApp（名字匹配子句）与 CandidatePanelController.isWeChatFrontmost 都调用此函数，口径一致。
     static func isWeChat(_ app: NSRunningApplication) -> Bool {
         if let id = app.bundleIdentifier, bundleIDs.contains(id) { return true }
-        return app.localizedName == "WeChat" || app.localizedName == "微信"
+        return app.localizedName.map(localizedNames.contains) ?? false
     }
 
     /// 仅按 bundle id 命中 bundleIDs（不含本地化名兜底）。供 findWeChatApp 的「偏向标准包」优先级语义复用。
@@ -253,8 +255,8 @@ enum WeChatAXProbe {
     /// 绝不下钻左侧会话列表的 AXScrollArea/AXTable（即主 split group 的另一个子节点）。
     private static func locateRightPanel(window: AXUIElement,
                                          diagnostics: inout [String]) -> AXUIElement? {
-        // 浅层查找主 split group：窗口直接子节点优先；个别版本可能再包一层，限深度 3 的浅查。
-        guard let mainSplit = findSplitGroupShallow(window, depth: 0, maxDepth: 3) else {
+        // 浅层查找主 split group：窗口直接子节点优先；个别版本可能再包一层，限深度 popoverShallowDepth 的浅查。
+        guard let mainSplit = findSplitGroupShallow(window, depth: 0, maxDepth: AXWalkLimit.popoverShallowDepth) else {
             diagnostics.append("未定位到主 AXSplitGroup（结构可能已变），请用『完整结构树（诊断·慢）』诊断")
             return nil
         }
@@ -445,6 +447,10 @@ enum WeChatAXProbe {
 
     // MARK: - 说话人 / 正文解析
 
+    /// 「我」说话前缀（半/全角冒号，含/不含「说」）：命中即归为 me，正文取前缀之后。
+    /// 与 SpeakerRegex 的半/全角冒号兼容同步——半角 : 与全角 ： 两套都要覆盖。
+    private static let mePrefixes = ["我说:", "我说：", "我:", "我："]
+
     /// 预编译正则（固定模式只编译一次，避免每条消息重复 NSRegularExpression 构造）。
     /// 行为不变：模式与原内联字面量逐字一致；DEBUG 下编译失败 assert 暴露，Release 下回退 nil（与原 try? 失败同义）。
     private enum SpeakerRegex {
@@ -487,7 +493,7 @@ enum WeChatAXProbe {
         }
 
         // 我说: / 我:（半/全角冒号）
-        for prefix in ["我说:", "我说：", "我:", "我："] {
+        for prefix in mePrefixes {
             if value.hasPrefix(prefix) {
                 let body = String(value.dropFirst(prefix.count))
                 return Message(speaker: .me, name: "", text: body, imageFrame: nil)

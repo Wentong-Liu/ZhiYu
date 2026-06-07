@@ -7,4 +7,8 @@ enum AXWalkLimit {
     static let maxNodes = 9000
     /// 遍历深度上限。
     static let maxDepth = 60
+    /// app 顶层「浅查」popover/主 split group 的深度上限：popover/主 split 通常挂在 app/window 顶层，
+    /// 限浅层避免 DFS 扎进左侧聊天巨表（项目已知性能痛点）。StickerSender.findPopoverShallow 与
+    /// WeChatAXProbe.findSplitGroupShallow(maxDepth:) 同语义共用。
+    static let popoverShallowDepth = 3
 }

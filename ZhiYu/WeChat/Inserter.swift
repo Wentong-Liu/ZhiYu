@@ -7,6 +7,8 @@ enum Inserter {
     private static let readinessPollInterval: TimeInterval = 0.06
     /// 发送前轮询的总超时（超过仍不就绪则放弃回车，约 1.5s）。
     private static let readinessTimeout: TimeInterval = 1.5
+    /// 逐条发送时，上一条发出后到发下一条之间的间隔（叠加 fillAndSend 内部时序，约 0.8s/条）。
+    private static let sequentialSendGap: TimeInterval = 0.4
 
     /// 仅填入微信输入框。
     @discardableResult
@@ -63,8 +65,8 @@ enum Inserter {
                 NSLog("[ZhiYu] sendSequential 第 %d/%d 条未发出，停止后续以避免覆盖/乱序", i + 1, parts.count)
                 return
             }
-            // 上一条发出后留 0.4s 再发下一条（叠加 fillAndSend 内部时序，约 0.8s/条）。
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            // 上一条发出后留 sequentialSendGap 再发下一条。
+            DispatchQueue.main.asyncAfter(deadline: .now() + sequentialSendGap) {
                 sendNext(parts, i + 1, targetContact)
             }
         }

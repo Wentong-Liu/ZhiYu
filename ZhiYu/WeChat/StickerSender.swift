@@ -137,12 +137,13 @@ enum StickerSender {
     private static func findRole(_ role: String, in root: AXUIElement) -> AXUIElement? {
         findFirst(in: root) { WeChatAXProbe.role($0) == role }
     }
-    /// 只在 app 顶层浅查 AXPopover（深度≤3），避免 DFS 深入左侧聊天巨表（项目已知性能痛点）。
+    /// 只在 app 顶层浅查 AXPopover（深度≤AXWalkLimit.popoverShallowDepth），避免 DFS 深入左侧聊天巨表（项目已知性能痛点）。
     /// popover 通常是 app 的顶层子节点；这层只触及个位数节点，触不到表格行。
+    /// 浅查深度与 WeChatAXProbe.findSplitGroupShallow(maxDepth:) 同语义共用一个常量。
     private static func findPopoverShallow(_ appEl: AXUIElement) -> AXUIElement? {
         func scan(_ el: AXUIElement, _ d: Int) -> AXUIElement? {
             if WeChatAXProbe.role(el) == AXRole.popover { return el }
-            guard d < 3 else { return nil }
+            guard d < AXWalkLimit.popoverShallowDepth else { return nil }
             for c in WeChatAXProbe.children(el) { if let hit = scan(c, d + 1) { return hit } }
             return nil
         }
