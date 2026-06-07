@@ -16,6 +16,10 @@ public enum ChatGPTOAuth {
     public static let scope = "openid profile email offline_access"
     /// 协议 originator（单一真相源，供授权 URL、Responses header、User-Agent 派生复用）。
     public static let originator = "openclaw"
+    /// User-Agent 的 OS 段（拼在 originator 之后）：最终 UA = originator + 此段。
+    public static let userAgentOSSegment = " (macOS)"
+    /// 默认 User-Agent（originator + OS 段，单一真相源）：值与原内联 "\(originator) (macOS)" 逐字节一致。
+    public static let defaultUserAgent = originator + userAgentOSSegment
     /// token 响应缺省 expires_in 时的兜底有效期（秒）。
     /// 注意须远大于 OAuthTokens.expiryLeeway，否则刚拿到的 token 会立即被判过期。
     public static let defaultExpiresIn: Double = 3600

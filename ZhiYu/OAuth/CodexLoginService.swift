@@ -97,9 +97,10 @@ final class CodexLoginService {
             do {
                 let (data, resp) = try await URLSession.shared.data(
                     for: ChatGPTOAuth.tokenExchangeRequest(code: code, verifier: verifier))
-                guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else {
+                let http = resp as? HTTPURLResponse
+                guard let http, HTTPResponseValidator.successRange.contains(http.statusCode) else {
                     // 换 token 非 2xx：诊断串只含状态码，绝不含响应体（避免泄露 token）。
-                    let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                    let statusCode = http?.statusCode ?? -1
                     self.finish(.failure(LoginError.exchangeFailed("HTTP \(statusCode)"))); return
                 }
                 let tokens = try ChatGPTOAuth.parseTokenResponse(data)
@@ -131,9 +132,10 @@ final class CodexLoginService {
         do {
             let (data, resp) = try await URLSession.shared.data(
                 for: ChatGPTOAuth.refreshRequest(refreshToken: tokens.refreshToken))
-            guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else {
+            let http = resp as? HTTPURLResponse
+            guard let http, HTTPResponseValidator.successRange.contains(http.statusCode) else {
                 // 刷新非 2xx：只记状态码，绝不打印响应体（避免泄露 token）；行为不变，照常返回 nil。
-                let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                let status = http?.statusCode ?? -1
                 NSLog("[ZhiYu][CodexLogin] token 刷新失败 status=%d", status)
                 return nil
             }

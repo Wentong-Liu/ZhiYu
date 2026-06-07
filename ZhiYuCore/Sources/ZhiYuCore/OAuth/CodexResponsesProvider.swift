@@ -13,9 +13,11 @@ public struct CodexResponsesProvider: LLMProvider {
     private static let requestTimeout = LLMDefaults.requestTimeout
     /// SSE 读取循环的整体上限（秒）：超过则判定流卡死并失败，避免无限挂起。
     private static let maxStreamSeconds: TimeInterval = 90
+    /// SSE 行的数据前缀（判前缀与剥前缀共用，避免同串写两遍）。
+    private static let dataPrefix = "data:"
 
     public init(accessToken: String, accountId: String, model: String,
-                userAgent: String = "\(ChatGPTOAuth.originator) (macOS)", session: URLSession = .shared) {
+                userAgent: String = ChatGPTOAuth.defaultUserAgent, session: URLSession = .shared) {
         self.accessToken = accessToken
         self.accountId = accountId
         self.model = model
@@ -126,8 +128,8 @@ public struct CodexResponsesProvider: LLMProvider {
             if ProcessInfo.processInfo.systemUptime - start > Self.maxStreamSeconds {
                 throw ProviderError.streamFailed(body: "stream timed out after \(Int(Self.maxStreamSeconds))s")
             }
-            guard line.hasPrefix("data:") else { continue }
-            let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix(Self.dataPrefix) else { continue }
+            let payload = line.dropFirst(Self.dataPrefix.count).trimmingCharacters(in: .whitespaces)
             if payload.isEmpty || payload == "[DONE]" { continue }
             guard let payloadData = payload.data(using: .utf8),
                   let event = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],

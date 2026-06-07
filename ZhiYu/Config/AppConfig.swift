@@ -181,8 +181,13 @@ final class AppConfig {
         return ReplyStyle.preset(named: presets[styleIndex].name)
     }
 
+    /// modelTag 里 Provider 与模型之间的分隔符（缓存键用，斜杠紧凑无空格）。
+    private static let modelTagSeparator = "/"
+    /// providerLabel 里 Provider 与模型之间的分隔符（展示用，中点带左右空格）。
+    private static let providerLabelSeparator = " · "
+
     /// 缓存区分用：Provider+模型 标签，如 "DeepSeek/deepseek-v4-flash"。
-    var modelTag: String { "\(providerKind.rawValue)/\(model)" }
+    var modelTag: String { "\(providerKind.rawValue)\(Self.modelTagSeparator)\(model)" }
     /// 面板展示用：如 "DeepSeek · deepseek-v4-flash"。
-    var providerLabel: String { "\(providerKind.rawValue) · \(model)" }
+    var providerLabel: String { "\(providerKind.rawValue)\(Self.providerLabelSeparator)\(model)" }
 }
