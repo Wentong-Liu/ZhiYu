@@ -7,7 +7,8 @@ enum KeychainStore {
     static let service = "com.liuwentong.ZhiYu"
     static let chatGPTTokensAccount = "chatgpt.oauthTokens"
 
-    /// 写入凭证。返回是否真正写入成功（SecItemAdd 的 OSStatus == errSecSuccess）。
+    /// 写入凭证。非破坏写：先 SecItemUpdate（成功即返回 true）；不存在时再 SecItemAdd。
+    /// 不先 SecItemDelete，避免写入失败时丢掉旧值。返回是否真正写入成功。
     @discardableResult
     static func set(_ value: String, account: String) -> Bool {
         let data = Data(value.utf8)
@@ -16,14 +17,22 @@ enum KeychainStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
-        var add = query
-        add[kSecValueData as String] = data
-        let status = SecItemAdd(add as CFDictionary, nil)
-        if status != errSecSuccess {
-            NSLog("[KeychainStore] SecItemAdd 写入失败 account=\(account) status=\(status)")
+        // 1) 先尝试更新现有项（仅改 kSecValueData）。
+        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        // 2) 不存在则新增（带完整属性）。
+        if updateStatus == errSecItemNotFound {
+            var add = query
+            add[kSecValueData as String] = data
+            let addStatus = SecItemAdd(add as CFDictionary, nil)
+            if addStatus != errSecSuccess {
+                NSLog("[KeychainStore] SecItemAdd 写入失败 account=\(account) status=\(addStatus)")
+            }
+            return addStatus == errSecSuccess
         }
-        return status == errSecSuccess
+        // 3) 其它错误：保留旧值、返回失败。
+        NSLog("[KeychainStore] SecItemUpdate 写入失败 account=\(account) status=\(updateStatus)")
+        return false
     }
 
     static func get(account: String) -> String? {

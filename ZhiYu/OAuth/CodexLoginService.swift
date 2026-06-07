@@ -103,8 +103,12 @@ final class CodexLoginService {
                     self.finish(.failure(LoginError.exchangeFailed("HTTP \(statusCode)"))); return
                 }
                 let tokens = try ChatGPTOAuth.parseTokenResponse(data)
-                KeychainStore.saveChatGPTTokens(tokens)
-                self.finish(.success(tokens))
+                // 保存失败不报成功：写不进钥匙串则如实报失败。
+                if KeychainStore.saveChatGPTTokens(tokens) {
+                    self.finish(.success(tokens))
+                } else {
+                    self.finish(.failure(LoginError.exchangeFailed("无法写入钥匙串")))
+                }
             } catch {
                 self.finish(.failure(LoginError.exchangeFailed(error.localizedDescription)))
             }
@@ -134,7 +138,10 @@ final class CodexLoginService {
                 return nil
             }
             let refreshed = try ChatGPTOAuth.parseTokenResponse(data, fallbackRefresh: tokens.refreshToken)
-            KeychainStore.saveChatGPTTokens(refreshed)
+            // 非破坏写已保旧值不丢；持久化失败仅记日志，本次仍用内存中的 refreshed。
+            if !KeychainStore.saveChatGPTTokens(refreshed) {
+                NSLog("[ZhiYu][CodexLogin] 刷新 token 持久化失败")
+            }
             return refreshed
         } catch {
             // 刷新请求抛错（网络/解码等）：记录 error 助排查（行为不变，照常返回 nil）。
