@@ -19,8 +19,9 @@ enum WeChatReader {
         case .failure:
             return nil
         case .success(let r):
-            // 收集非空 imageFrame（图片/表情），取最近 2 个、保持时间顺序。
-            let frames = r.messages.compactMap { $0.imageFrame }
+            // 只收集对方消息(.other)的非空 imageFrame（图片/表情），取最近 2 个、保持时间顺序；
+            // 避免把自己发的图当对方图喂模型。
+            let frames = r.messages.compactMap { $0.speaker == .other ? $0.imageFrame : nil }
             let recent = frames.count > 2 ? Array(frames.suffix(2)) : frames
             return Snapshot(context: context(from: r), composerFrame: r.inputFrame, imageFrames: recent)
         }
