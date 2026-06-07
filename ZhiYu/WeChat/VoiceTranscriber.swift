@@ -164,13 +164,23 @@ enum VoiceTranscriber {
     static func unconvertedVoices(in root: AXUIElement) -> [AXUIElement] {
         var out: [AXUIElement] = []
         var n = 0
-        func walk(_ el: AXUIElement, _ d: Int) {
-            if n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return }
+        @discardableResult
+        func walk(_ el: AXUIElement, _ d: Int) -> Bool {
+            if n > AXWalkLimit.maxNodes || d > AXWalkLimit.maxDepth { return false }
             n += 1
-            if let t = WeChatAXProbe.bestText(el), t.contains(WeChatMarkers.sentVoice), !t.contains(WeChatMarkers.converted) {
-                out.append(el)
+            var childHasVoice = false
+            for c in WeChatAXProbe.children(el) {
+                if walk(c, d + 1) { childHasVoice = true }
             }
-            for c in WeChatAXProbe.children(el) { walk(c, d + 1) }
+            if childHasVoice { return true }
+            if let t = WeChatAXProbe.bestText(el),
+               t.contains(WeChatMarkers.sentVoice),
+               !t.contains(WeChatMarkers.converted),
+               WeChatAXProbe.actions(el).contains(AXAction.showMenu) {
+                out.append(el)
+                return true
+            }
+            return false
         }
         walk(root, 0)
         return out
