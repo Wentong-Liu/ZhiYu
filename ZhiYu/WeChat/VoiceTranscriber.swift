@@ -38,7 +38,7 @@ enum VoiceTranscriber {
     /// 触发"最近最多 `max` 条"未转语音的转文字，并**等到这些气泡都转写落地或 `timeout` 超时再返回**。
     /// - 取未转语音（新→旧），只取最前 `max` 条（我的 + 对方的合计）。
     /// - 逐条快速触发；触发完毕后轮询气泡文本，确认转写完成（出现「已转文字」或不再是「发送了一个语音」）。
-    static func transcribeRecentAndWait(max: Int = 5, timeout: TimeInterval = 8) async {
+    static func transcribeRecentAndWait(max: Int = 5, timeout: TimeInterval = 8, target: String? = nil) async {
         // 并发护栏：若已有一处在跑，等它结束（最多 timeout）再 return，不重复驱动菜单。
         if isRunning {
             let start = ProcessInfo.processInfo.systemUptime
@@ -63,10 +63,15 @@ enum VoiceTranscriber {
         let targets = Array(unconvertedVoices(in: panel).reversed().prefix(max))
         guard !targets.isEmpty else { return }
 
+        // 任何转写副作用之前先校验会话身份：会话已切换则整体中止。默认放行（isCurrentContact 内部处理）。
+        guard WeChatAXProbe.isCurrentContact(target) else { return }
+
         // 逐条快速触发，收集"成功点了转文字"的气泡，稍后轮询它们是否转写落地。
         var pressed: [AXUIElement] = []
         for bubble in targets {
             if Task.isCancelled { break }  // ESC 已取消：停止逐条触发，不再 AXShowMenu
+            // 每条触发前再校验会话身份：切了就停止对新气泡操作（已 pressed 的保留）。
+            guard WeChatAXProbe.isCurrentContact(target) else { break }
             if await triggerTranscribe(bubble, panel: panel, appEl: appEl) { pressed.append(bubble) }
         }
         guard !pressed.isEmpty else { return }

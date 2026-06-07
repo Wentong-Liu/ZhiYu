@@ -133,7 +133,7 @@ final class CandidatePanelController: NSObject {
                 // transcribeRecentAndWait 已等到转写落地，故重读拿到的是转写后的文本，generate 不会用 [语音] 占位。
                 if baseContext.messages.contains(where: { $0.text.contains(WeChatMarkers.voicePlaceholder) }) {
                     if generation == self.presentGeneration { self.model.loadingNote = "转写语音中…" }
-                    await VoiceTranscriber.transcribeRecentAndWait()
+                    await VoiceTranscriber.transcribeRecentAndWait(target: baseContact)
                     if Task.isCancelled { return }  // ESC 已取消：不再重读/生成
                     if let fresh = WeChatReader.readSnapshot() {
                         // 转写等待期间用户切到了别的会话：放弃本次（用旧上下文生成会发错会话），收掉面板。
