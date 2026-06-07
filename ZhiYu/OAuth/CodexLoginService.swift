@@ -98,8 +98,9 @@ final class CodexLoginService {
                 let (data, resp) = try await URLSession.shared.data(
                     for: ChatGPTOAuth.tokenExchangeRequest(code: code, verifier: verifier))
                 guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else {
-                    self.finish(.failure(LoginError.exchangeFailed(
-                        String(data: data, encoding: .utf8) ?? "非2xx"))); return
+                    // 换 token 非 2xx：诊断串只含状态码，绝不含响应体（避免泄露 token）。
+                    let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                    self.finish(.failure(LoginError.exchangeFailed("HTTP \(statusCode)"))); return
                 }
                 let tokens = try ChatGPTOAuth.parseTokenResponse(data)
                 KeychainStore.saveChatGPTTokens(tokens)
@@ -127,10 +128,9 @@ final class CodexLoginService {
             let (data, resp) = try await URLSession.shared.data(
                 for: ChatGPTOAuth.refreshRequest(refreshToken: tokens.refreshToken))
             guard let http = resp as? HTTPURLResponse, HTTPResponseValidator.successRange.contains(http.statusCode) else {
-                // 刷新非 2xx：记录状态码与 body 片段助排查（行为不变，照常返回 nil）。
+                // 刷新非 2xx：只记状态码，绝不打印响应体（避免泄露 token）；行为不变，照常返回 nil。
                 let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                let snippet = String((String(data: data, encoding: .utf8) ?? "").prefix(500))
-                NSLog("[ZhiYu][CodexLogin] token 刷新失败 status=%d body 片段=%@", status, snippet)
+                NSLog("[ZhiYu][CodexLogin] token 刷新失败 status=%d", status)
                 return nil
             }
             let refreshed = try ChatGPTOAuth.parseTokenResponse(data, fallbackRefresh: tokens.refreshToken)
