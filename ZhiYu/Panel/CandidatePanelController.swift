@@ -377,10 +377,12 @@ final class CandidatePanelController: NSObject {
         UserDefaults.standard.set([Double(f.minX), Double(f.minY), Double(f.width), Double(f.height)], forKey: Self.anchorKey)
     }
 
-    /// 面板存活期间的键盘处理：
-    /// - 本地监听：1/2/3 选中、Esc 关闭（面板恰为 key 时生效）。
-    /// - 全局 Esc 监听：自动弹出时微信在前台、本地监听收不到键，故再加全局 Esc 兜底关闭
-    ///   （只观察不吞事件，Esc 漏给微信无害）。不再监听"外部点击消失"——别的 app 弹窗点击会误关面板。
+    /// 面板存活期间的键盘处理（ESC 三路收敛，职责互斥）：
+    /// - 本地监听(local)：管 1/2/3 数字键选中，并在 tap 兜底失败时也能在面板为 key 时关闭(Esc)。始终注册。
+    /// - CGEventTap：ESC 关闭的主路——装上后独占消费 ESC（吞掉事件、无系统蜂鸣）。
+    /// - 全局监听(global)：仅在 tap 创建失败时才注册，作为真正的兜底关闭（只观察不吞、仍有蜂鸣）；
+    ///   tap 装上时不再注册它（否则它的 ESC 分支永远收不到被 tap 吞掉的事件，是冗余 no-op）。
+    /// 不再监听"外部点击消失"——别的 app 弹窗点击会误关面板。
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel != nil else { return event }
@@ -397,17 +399,21 @@ final class CandidatePanelController: NSObject {
             }
             return event
         }
-        escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.panel != nil else { return }
-            if (event.charactersIgnoringModifiers ?? "") == KeyCode.escapeChar { self.dismiss() }
+        // tap 为主：装上即由它消费 ESC；仅当 tap 创建失败时才挂 global ESC 监听作真正兜底。
+        if !installEscEventTap() {
+            escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, self.panel != nil else { return }
+                if (event.charactersIgnoringModifiers ?? "") == KeyCode.escapeChar { self.dismiss() }
+            }
         }
-        installEscEventTap()
     }
 
     /// 面板存活期临时装一个 CGEventTap 拦截 keyDown：仅 ESC(KeyCode.escape) 时 dismiss() 并吞掉事件
     /// （面板 .nonactivatingPanel/不抢焦点，ESC 实际仍发给微信→系统蜂鸣，故需在这里吞掉）。
-    /// 其余事件一律原样放行（含回车 keyCode 36，发送不受影响）；创建失败时回退到上面的 local/global NSEvent 监听（仅能关面板、仍有蜂鸣）。
-    private func installEscEventTap() {
+    /// 其余事件一律原样放行（含回车 keyCode 36，发送不受影响）；创建失败时回退到 global NSEvent 监听（仅能关面板、仍有蜂鸣）。
+    /// 返回 tap 是否成功装上：装上则由它独占处理 ESC（消费/无蜂鸣），调用方据此决定是否再挂 global 兜底。
+    @discardableResult
+    private func installEscEventTap() -> Bool {
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let callback: CGEventTapCallBack = { _, type, event, refcon in
@@ -429,12 +435,13 @@ final class CandidatePanelController: NSObject {
             return Unmanaged.passUnretained(event)  // 其余按键/事件一律原样放行（含回车 keyCode 36，发送不受影响）
         }
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: callback, userInfo: refcon) else {
-            NSLog("[ZhiYu] ESC CGEventTap 创建失败，回退到 global monitor（关闭面板仍可、但有蜂鸣）"); return
+            NSLog("[ZhiYu] ESC CGEventTap 创建失败，回退到 global monitor（关闭面板仍可、但有蜂鸣）"); return false
         }
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         escEventTap = tap; escRunLoopSource = src
+        return true
     }
 
     func dismiss() {
