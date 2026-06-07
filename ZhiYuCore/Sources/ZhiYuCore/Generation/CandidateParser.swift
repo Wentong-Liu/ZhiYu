@@ -64,7 +64,13 @@ public enum CandidateParser {
     /// 尝试把一段文本按 `[String]` JSON 解码，失败返回 nil。
     private static func decodeStringArray(_ s: String) -> [String]? {
         guard let data = s.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode([String].self, from: data)
+        if let arr = try? JSONDecoder().decode([String].self, from: data) { return arr }
+        // 契约违例区分（不改控制流，仍返回 nil 走 parseLines 兜底）：
+        // 是合法 JSON 数组、但元素不是字符串（如 [1,2] / [{...}]）→ 模型违反「只返回字符串数组」约定，单独记一条便于排查。
+        if (try? JSONSerialization.jsonObject(with: data)) is [Any] {
+            NSLog("[ZhiYu][CandidateParser] JSON 数组元素非字符串，违反字符串数组约定，降级按行解析")
+        }
+        return nil
     }
 
     /// 从第一个 `[` 起做中括号配平，返回包含匹配收尾 `]` 的子串；忽略 JSON 字符串字面量内部的括号与转义。

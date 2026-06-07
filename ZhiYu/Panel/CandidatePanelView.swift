@@ -161,6 +161,8 @@ struct CandidatePanelView: View {
         .offset(y: appeared ? 0 : 12)
         .animation(.spring(response: 0.5, dampingFraction: 0.82).delay(Double(i) * 0.06), value: appeared)
         .animation(.easeOut(duration: 0.14), value: hoverIndex)
+        // 进入本卡：高亮 i。离开本卡：仅当当前高亮仍是 i 才清空——
+        // 防止「离开 A 的回调晚于进入 B 的回调」时把已高亮的 B 误清掉（保留 B 的高亮）。
         .onHover { inside in hoverIndex = inside ? i : (hoverIndex == i ? nil : hoverIndex) }
     }
 

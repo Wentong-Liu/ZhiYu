@@ -6,9 +6,11 @@ import ZhiYuCore
 /// 用 flagsChanged 捕捉目标键的「按下」边沿；夹了其它键按下则重置，避免 ⌘C/⌘V 误触。
 @MainActor
 final class ModifierDoubleTap {
+    /// 判定「双击」的两次按下最大间隔（秒）。
+    private static let doubleTapThreshold: TimeInterval = 0.4
     private var flagsMonitor: Any?
     private var keyMonitor: Any?
-    private var detector = DoubleTapDetector(threshold: 0.4)
+    private var detector = DoubleTapDetector(threshold: doubleTapThreshold)
     var onTrigger: (() -> Void)?
 
     func start() {

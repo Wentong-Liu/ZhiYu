@@ -363,7 +363,6 @@ enum WeChatAXProbe {
     /// 或 AXChildren 不直接给行），则在表子树内按文档顺序收集叶子非空 AXValue 兜底（表子树小，开销可接受）。
     /// 读 bestText(AXValue/AXTitle/AXDescription)，解析说话人，取最后 N 行。
     private static func readMessages(from table: AXUIElement, diagnostics: inout [String]) -> [Message] {
-        let allChildren = children(table)
         let rows = rows(of: table)
         // 行路径：每行取首个非空文本，同时在行子树检测图片/表情的 frame。
         var parsed: [Message] = []
@@ -389,7 +388,7 @@ enum WeChatAXProbe {
             // 兜底路径拿不到行元素，imageFrame 一律为 nil（仅文本上下文）。
             parsed = rawValues.map { parseMessage($0) }
         }
-        diagnostics.append("消息表: 子节点=\(allChildren.count) 行=\(rows.count) 取值=\(parsed.count)\(usedFallback ? "(兜底)" : "")")
+        diagnostics.append("消息表: 子节点=\(children(table).count) 行=\(rows.count) 取值=\(parsed.count)\(usedFallback ? "(兜底)" : "")")
         return parsed.count > maxMessages ? Array(parsed.suffix(maxMessages)) : parsed
     }
 
@@ -406,11 +405,23 @@ enum WeChatAXProbe {
     /// 行内下钻到第一个含非空文本的叶子，返回其 frame（图片消息无子 AXImage 时，截该文本叶子的区域）。
     private static func firstNonEmptyValueFrame(in el: AXUIElement, depth: Int) -> CGRect? {
         guard depth < rowDescendMaxDepth else { return nil }
-        if bestText(el) != nil, let f = frame(of: el) { return f }
+        if hasText(el), let f = frame(of: el) { return f }
         for child in children(el) {
             if let f = firstNonEmptyValueFrame(in: child, depth: depth + 1) { return f }
         }
         return nil
+    }
+
+    /// 元素是否含非空文本（命中即短路返回 true，不物化字符串）：与 bestText 同口径遍历 AXValue/AXTitle/AXDescription，
+    /// 只关心存在性的调用方（如 firstNonEmptyValueFrame）用它避免读出又丢弃整段字符串。
+    private static func hasText(_ el: AXUIElement) -> Bool {
+        for attr in [AXAttr.value, AXAttr.title, AXAttr.description] {
+            if let s = copyString(el, attr),
+               !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return true
+            }
+        }
+        return false
     }
 
     /// 表子树内按文档顺序收集叶子节点的非空 AXValue（跳过 AXColumn/滚动条避免与行重复）。
