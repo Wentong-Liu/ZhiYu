@@ -81,14 +81,20 @@ final class CandidatePanelController: NSObject {
             present(snapshot: snap)
             return
         }
-        // 先用上次锚点立即弹出加载面板，再在下一个 runloop 异步读会话。
+        // 先用上次锚点立即弹出加载面板，再异步读会话。
         let generation = beginPresentation(anchor: anchorAXFrame)
-        // 关键：必须 DispatchQueue.main.async（不能同步调用 readSnapshot）——这样加载面板会在阻塞式 readSnapshot 之前先完成绘制，即"立即弹出"。
-        DispatchQueue.main.async { [weak self] in
-            guard let self, generation == self.presentGeneration else { return }
+        // 关键：阻塞式 readSnapshot（~200ms 同步 AX 读）放到后台线程跑，腾空主 run loop——
+        // 这样加载面板能在读之前先绘制（"立即弹出"），且读进行中按 ESC 时，ESC 的 CGEventTap 回调
+        // 不再排在同步读之后，可立即触发 dismiss()，面板秒关。Task 在 @MainActor 类里继承 @MainActor，
+        // 故 await 之后回到主线程，访问 self 状态安全。
+        Task { [weak self] in
             let t0 = Date()
-            guard let snap = WeChatReader.readSnapshot(), !snap.context.messages.isEmpty else { self.dismiss(); NSSound.beep(); return }
+            let snap = await Task.detached { WeChatReader.readSnapshot() }.value  // 读会话在后台线程
+            guard let self else { return }
+            // 期间已 ESC/dismiss(panel=nil) 或被新 present 取代 → 丢弃，绝不在已关闭/已被取代的面板上继续。
+            guard generation == self.presentGeneration, self.panel != nil else { return }
             NSLog("[ZhiYu] trigger readSnapshot %.0fms", Date().timeIntervalSince(t0) * 1000)
+            guard let snap, !snap.context.messages.isEmpty else { self.dismiss(); NSSound.beep(); return }
             // 复用记住的位置：读回来只用于出候选，不重定位面板（避免跳动）。位置由首次读取确立、之后靠手动拖动调整。
             self.lastSeenSig[snap.context.contactName] = MessageSignal.signature(snap.context)
             self.presentTargetContact = snap.context.contactName  // 记本次面板的目标会话，供落地动作校验
@@ -419,7 +425,9 @@ final class CandidatePanelController: NSObject {
         if let tap = escEventTap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap); escEventTap = nil }
         panel?.close()
         panel = nil
-        drainPendingRecheck()  // 忙碌期到过新消息则补跑评估
+        // 延后补跑评估到下一轮 run loop：让 panel?.close() 先生效、视觉先刷新（ESC 后面板即时关），
+        // 补跑的会话评估（可能再触发昂贵读取）放到下一轮，不阻塞本次关闭的视觉响应。
+        DispatchQueue.main.async { [weak self] in self?.drainPendingRecheck() }
     }
 
     /// 主显示器（含 AppKit 全局原点、frame.origin == (0,0) 的屏）的高度；AX/CG 全局 y 翻转的基准。
