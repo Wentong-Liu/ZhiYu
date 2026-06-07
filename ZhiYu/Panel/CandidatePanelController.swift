@@ -32,6 +32,8 @@ final class CandidatePanelController: NSObject {
     private let cache = CandidateCache()
     private var keyMonitor: Any?
     private var escGlobalMonitor: Any?
+    private var escEventTap: CFMachPort?
+    private var escRunLoopSource: CFRunLoopSource?
 
     /// 按联系人记的"已展示/已建基线"会话指纹：只有当前打开会话的指纹相对基线变化、且最后一条是对方发的，
     /// 才算新消息。避免"联系人 A 来消息但当前开着 B"时误把 B 当新消息弹出来。
@@ -371,6 +373,40 @@ final class CandidatePanelController: NSObject {
             guard let self, self.panel != nil else { return }
             if (event.charactersIgnoringModifiers ?? "") == "\u{1B}" { self.dismiss() }
         }
+        installEscEventTap()
+    }
+
+    /// 面板存活期临时装一个 CGEventTap 拦截 keyDown：仅 ESC(keyCode 53) 时 dismiss() 并吞掉事件
+    /// （面板 .nonactivatingPanel/不抢焦点，ESC 实际仍发给微信→系统蜂鸣，故需在这里吞掉）。
+    /// 其余事件一律原样放行（含回车 keyCode 36，发送不受影响）；创建失败时回退到上面的 local/global NSEvent 监听（仅能关面板、仍有蜂鸣）。
+    private func installEscEventTap() {
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        let callback: CGEventTapCallBack = { _, type, event, refcon in
+            // tap 被系统因超时/用户输入禁用时重新启用
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let refcon {
+                    let ctrl = Unmanaged<CandidatePanelController>.fromOpaque(refcon).takeUnretainedValue()
+                    if let tap = ctrl.escEventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+                }
+                return Unmanaged.passUnretained(event)
+            }
+            if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {  // 53 = ESC
+                if let refcon {
+                    let ctrl = Unmanaged<CandidatePanelController>.fromOpaque(refcon).takeUnretainedValue()
+                    MainActor.assumeIsolated { ctrl.dismiss() }
+                }
+                return nil  // 吞掉 ESC：不发给微信、无蜂鸣
+            }
+            return Unmanaged.passUnretained(event)  // 其余按键/事件一律原样放行（含回车 keyCode 36，发送不受影响）
+        }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: callback, userInfo: refcon) else {
+            NSLog("[ZhiYu] ESC CGEventTap 创建失败，回退到 global monitor（关闭面板仍可、但有蜂鸣）"); return
+        }
+        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        escEventTap = tap; escRunLoopSource = src
     }
 
     func dismiss() {
@@ -378,6 +414,9 @@ final class CandidatePanelController: NSObject {
         isBusy = false                            // 取消后不要卡在 busy，否则自动评估会被一直抑制
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         if let m = escGlobalMonitor { NSEvent.removeMonitor(m); escGlobalMonitor = nil }
+        // 彻底拆除 ESC CGEventTap，避免面板关后仍全局拦键
+        if let src = escRunLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes); escRunLoopSource = nil }
+        if let tap = escEventTap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap); escEventTap = nil }
         panel?.close()
         panel = nil
         drainPendingRecheck()  // 忙碌期到过新消息则补跑评估
