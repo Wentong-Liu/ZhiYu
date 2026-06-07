@@ -11,7 +11,10 @@ public final class CandidateCache: @unchecked Sendable {
 
     public func candidates(forKey key: String) -> [String]? {
         lock.lock(); defer { lock.unlock() }
-        return storage[key]
+        // 空数组视为未命中（防空候选中毒：解析失败时存了 []，否则该 context 会永久命中空结果而不再重生成）。
+        // 与 stickerStorage 的 !isEmpty 守卫对称。
+        guard let stored = storage[key], !stored.isEmpty else { return nil }
+        return stored
     }
 
     public func store(_ candidates: [String], forKey key: String) {

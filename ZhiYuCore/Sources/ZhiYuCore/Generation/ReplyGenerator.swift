@@ -32,8 +32,12 @@ public struct ReplyGenerator: Sendable {
         let raw = try await provider.complete(messages: messages)
         let candidates = CandidateParser.parse(raw, max: candidateCount).map(HumanizeFilter.clean)
         let sticker = CandidateParser.parseSticker(raw)
-        cache.store(candidates, forKey: key)
-        cache.storeSticker(sticker, forKey: key)
+        // 双保险：仅在候选非空时落缓存，避免「空候选中毒」（解析失败的 context 永久命中空结果）。
+        // 即便落了空数组，candidates(forKey:) 也会把空当未命中，但这里直接不写更省内存。
+        if !candidates.isEmpty {
+            cache.store(candidates, forKey: key)
+            cache.storeSticker(sticker, forKey: key)
+        }
         return ReplyResult(candidates: candidates, stickerKeyword: sticker)
     }
 }
