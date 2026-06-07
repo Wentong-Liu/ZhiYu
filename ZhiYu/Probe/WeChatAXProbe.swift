@@ -2,7 +2,10 @@ import AppKit
 import ApplicationServices
 import ZhiYuCore
 
-@MainActor
+/// 非隔离：run() 及其调用链只做 AX C-API 读取 + NSRunningApplication 查询（线程安全），
+/// 全部 static 成员均为不可变 let 常量（角色/属性名、遍历阈值、预编译正则），无可变 static 状态、不触主线程独有 API，
+/// 故可安全 off-main 调用——把候选触发时阻塞式的 AX 读会话挪到后台线程，腾空主 run loop 让 ESC 回调即时执行。
+/// 主线程调 nonisolated 合法，原有 @MainActor 调用方（Inserter/Sticker/Voice/Watcher/控制器）无需改动。
 enum WeChatAXProbe {
     // 微信 Mac 可能的 bundle id（不同版本/渠道可能不同）
     static let bundleIDs = ["com.tencent.xinWeChat", "com.tencent.WeChat"]
@@ -46,7 +49,7 @@ enum WeChatAXProbe {
     /// composer 宽度门槛，排除左上角窄搜索框。
     private static let minComposerWidth: CGFloat = 120
 
-    enum ProbeError: Error, CustomStringConvertible {
+    enum ProbeError: Error, CustomStringConvertible, Sendable {
         case noPermission, weChatNotRunning, noWindow
         var description: String {
             switch self {
@@ -58,14 +61,14 @@ enum WeChatAXProbe {
     }
 
     /// 说话人归属。
-    enum Speaker {
+    enum Speaker: Sendable {
         case me
         case other
         case separator  // 纯时间行 / 系统分隔，正文为时间或提示
     }
 
     /// 一条消息（探针本地轻量类型，不依赖 ZhiYuCore）。
-    struct Message {
+    struct Message: Sendable {
         let speaker: Speaker
         let name: String   // 发言人名（other 才有意义；me/separator 为空）
         let text: String   // 正文
@@ -80,7 +83,7 @@ enum WeChatAXProbe {
     }
 
     /// 探针读取结果（本地轻量类型，不依赖 ZhiYuCore）。
-    struct ProbeResult {
+    struct ProbeResult: Sendable {
         var elapsedMs: Int          // 本次快速读取耗时（毫秒）
         var contactName: String
         var messages: [Message]

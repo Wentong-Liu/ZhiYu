@@ -6,7 +6,9 @@ import ZhiYuCore
 enum WeChatReader {
     /// 一次 AX 读取的结果：会话上下文 + 输入框屏幕 frame（AX 左上原点坐标，可能为 nil）。
     /// 双击触发应只读一次，避免两次遍历观察到不一致的 UI 状态（会话切换后消息与输入框来自不同会话）。
-    struct Snapshot {
+    /// Sendable：全部为值类型（ChatContext/ChatMessage 均 Sendable、CGRect 值类型），
+    /// 可在后台线程读出后安全跨回主线程。
+    struct Snapshot: Sendable {
         let context: ChatContext
         let composerFrame: CGRect?
         /// 最近最多 2 条图片/表情消息的气泡 frame（AX 全局左上原点坐标，按时间顺序）。
@@ -14,7 +16,9 @@ enum WeChatReader {
     }
 
     /// 单次 AX 探针：从同一个 ProbeResult 同时得到上下文与输入框 frame。读不到返回 nil。
-    static func readSnapshot() -> Snapshot? {
+    /// nonisolated：只调 WeChatAXProbe（已去隔离、线程安全）+ VoiceText.clean（纯字符串处理），
+    /// 故可在后台线程执行——候选触发时把这次阻塞式 AX 读会话挪出主线程，ESC 回调即时响应。
+    nonisolated static func readSnapshot() -> Snapshot? {
         switch WeChatAXProbe.run() {
         case .failure:
             return nil
@@ -42,7 +46,8 @@ enum WeChatReader {
     }
 
     /// 把探针结果映射为 ChatContext（时间/系统分隔行不进上下文）。
-    private static func context(from r: WeChatAXProbe.ProbeResult) -> ChatContext {
+    /// nonisolated：仅做值映射 + VoiceText.clean（纯字符串处理），供 off-main 的 readSnapshot 调用。
+    nonisolated private static func context(from r: WeChatAXProbe.ProbeResult) -> ChatContext {
         let msgs: [ChatMessage] = r.messages.compactMap { m in
             switch m.speaker {
             case .me:    return ChatMessage(speaker: .me, text: VoiceText.clean(m.text))
