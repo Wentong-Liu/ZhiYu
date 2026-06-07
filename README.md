@@ -47,16 +47,6 @@
 
 </div>
 
-## ⬇️ 下载
-
-从 [**Releases**](https://github.com/Wentong-Liu/ZhiYu/releases/latest) 下载最新的 **`ZhiYu.dmg`**（已 Developer ID 签名并经 Apple 公证，macOS 15+ 双击即可打开，无 Gatekeeper 警告）。
-
-1. 打开 DMG，将 **知语 ZhiYu** 拖入「应用程序」并启动（常驻菜单栏，无 Dock 图标）。
-2. 在 **设置 → 通用 → 权限** 授予「辅助功能」（读取微信会话、模拟输入必需）；需要图片识别再授予「屏幕录制」。
-3. 在 **设置 → 模型** 选择 Provider 并填入 API Key（或用 ChatGPT 登录），即可双击触发键唤起候选面板。
-
-> 想自行编译，见下方「快速开始」。
-
 ## 🚀 快速开始
 
 **环境**
