@@ -11,9 +11,9 @@ enum Inserter {
     /// 几乎瞬间清空；宽超时避免「真发了但清慢了」被误判失败而漏掉后面几条。
     private static let sendConfirmTimeout: TimeInterval = 1.5
     /// 回车 post 后先让微信处理一次键盘事件，再开始 AX 读取确认，避免确认读值抢在发送处理之前。
-    private static let sendConfirmInitialDelay: TimeInterval = 0.2
-    /// 逐条发送时，上一条发出后到发下一条之间的间隔（叠加 fillAndSend 内部时序，约 0.8s/条）。
-    private static let sequentialSendGap: TimeInterval = 0.4
+    private static let sendConfirmInitialDelay: TimeInterval = 0.12
+    /// 逐条发送时，上一条发出后到发下一条之间的间隔（叠加 fillAndSend 内部时序，约 0.4s/条）。
+    private static let sequentialSendGap: TimeInterval = 0.2
 
     /// 仅填入微信输入框。
     @discardableResult
