@@ -136,4 +136,19 @@ struct OpenAIProviderTests {
             _ = try await provider.complete(messages: [LLMMessage(role: .user, content: "hi")])
         }
     }
+
+    /// content 为 null（模型回了但内容为空）：不应抛 .invalidResponse，而是解码成功并返回空串。
+    @Test func completeContentNullReturnsEmptyStringNotInvalidResponse() async throws {
+        MockURLProtocol.handler = { req in
+            let body = """
+            {"choices":[{"message":{"role":"assistant","content":null}}]}
+            """.data(using: .utf8)!
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, body)
+        }
+        let provider = OpenAICompatibleProvider(
+            config: .openAI(model: "gpt-4o"), apiKey: "sk-test", session: mockSession())
+        let text = try await provider.complete(messages: [LLMMessage(role: .user, content: "hi")])
+        #expect(text == "")
+    }
 }

@@ -41,7 +41,9 @@ public struct OpenAICompatibleProvider: LLMProvider {
         let temperature: Double
     }
     private struct ResponseBody: Decodable {
-        struct Choice: Decodable { struct Msg: Decodable { let content: String }; let message: Msg }
+        // content 设为可空：模型「回了但 content 为 null/缺失」时仍能解码（取值处兜底空串），
+        // 不再因缺 content 抛 .invalidResponse。有 content 的正常路径不变。
+        struct Choice: Decodable { struct Msg: Decodable { let content: String? }; let message: Msg }
         let choices: [Choice]
     }
 
@@ -71,13 +73,14 @@ public struct OpenAICompatibleProvider: LLMProvider {
         let http = try HTTPResponseValidator.httpResponse(from: response)
         try HTTPResponseValidator.throwIfHTTPError(http, body: String(data: data, encoding: .utf8) ?? "")
         guard let parsed = try? JSONDecoder().decode(ResponseBody.self, from: data),
-              let content = parsed.choices.first?.message.content else {
-            // 成功状态码下却解不出 choices[].message.content：记录 body 片段助排查（行为不变，照常抛 .invalidResponse）。
+              let message = parsed.choices.first?.message else {
+            // 成功状态码下却解不出 choices[].message：记录 body 片段助排查（行为不变，照常抛 .invalidResponse）。
             let snippet = String((String(data: data, encoding: .utf8) ?? "").prefix(500))
             NSLog("[ZhiYu][OpenAICompatible] HTTP %d 成功但 JSON 解码失败，body 片段=%@", http.statusCode, snippet)
             throw ProviderError.invalidResponse
         }
-        return content
+        // content 为 null/缺失（合法的空回复）兜底空串，不再误报 .invalidResponse；有 content 时原样返回。
+        return message.content ?? ""
     }
 
     /// 把一条 LLMMessage 转成线上 content：
