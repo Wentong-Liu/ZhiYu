@@ -43,7 +43,7 @@
 
 **候选面板** —— 双击右 ⌘ 呈现，选择其一填入或直接发送
 
-<img src="docs/images/screenshot-panel.png" width="540" alt="候选回复面板" />
+<img src="docs/images/screenshot-panel.gif" width="540" alt="候选回复面板" />
 
 </div>
 
