@@ -111,3 +111,5 @@
 ## 📄 License
 
 [MIT](LICENSE) © 2026 Wentong Liu
+
+🤖 使用 [Claude Code](https://claude.com/claude-code) 在一天内开发完成。
