@@ -7,6 +7,7 @@
 **macOS 菜单栏中的微信回复助手** —— 理解当前会话，借助大模型生成候选回复，一键填入或发送。
 
 ![platform](https://img.shields.io/badge/platform-macOS%2015%2B-black)
+![wechat](https://img.shields.io/badge/WeChat-3.8.x-07C160)
 ![swift](https://img.shields.io/badge/Swift-6-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
@@ -51,8 +52,10 @@
 
 **环境**
 - macOS 15+
-- Mac 版微信（测试于 **3.8.10（28633）**，原生 AppKit）
+- **Mac 版微信 3.8.x**（测试于 **3.8.10（28633）**，原生 AppKit）
 - 构建需 Xcode 16+
+
+> ⚠️ **不支持微信 4.x。** 微信自 4.0 起将聊天界面整体改为 Chromium 渲染的画布，**移除了辅助功能（Accessibility）接口**——窗口内除红绿灯按钮外不再暴露任何可读元素。知语「纯 AX」地读写消息所依赖的无障碍树已不复存在，故在 4.x 上无法工作（双击触发后面板不会弹出）。若你已升级到 4.x，需降级回 **3.8.x** 才能使用。
 
 ## 🔑 权限
 
